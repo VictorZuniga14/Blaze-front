@@ -1,0 +1,132 @@
+# Publica el instalador Blaze (Windows NSIS) al pushear un tag v* o desde Actions.
+# Requisito: Release fijo "vendor" con pcsx2.7z + retroarch.7z (y opcional bios.7z).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión sin v (ej. 0.1.2). Vacío = package.json"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+          } elseif ("${{ inputs.version }}".Trim()) {
+            $v = "${{ inputs.version }}".Trim().TrimStart("v")
+            $tag = "v$v"
+          } else {
+            $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+            $tag = "v$($pkg.version)"
+          }
+          $version = $tag.TrimStart("v")
+          if ($version -notmatch '^\d+\.\d+\.\d+') {
+            throw "Versión inválida: $version (esperado semver, ej. 0.1.2)"
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Release $tag ($version)"
+
+      - name: Sync version in project files
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $pkg.version = $ver
+          $pkg | ConvertTo-Json -Depth 20 | Set-Content package.json -Encoding utf8
+
+          $confPath = "src-tauri/tauri.conf.json"
+          $conf = Get-Content $confPath -Raw | ConvertFrom-Json
+          $conf.version = $ver
+          $conf | ConvertTo-Json -Depth 20 | Set-Content $confPath -Encoding utf8
+
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          $cargo = $cargo -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$ver`""
+          Set-Content src-tauri/Cargo.toml -Value $cargo -Encoding utf8
+
+      - name: Download vendor packs (Release tag vendor)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $packs = "src-tauri/resources/emulators/packs"
+          $bios = "src-tauri/resources/pcsx2/bios"
+          $tmp = "_vendor"
+          New-Item -ItemType Directory -Force -Path $packs, $bios, $tmp | Out-Null
+
+          gh release download vendor --repo "${{ github.repository }}" --dir $tmp
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falta el Release 'vendor' con pcsx2.7z y retroarch.7z. Crealo una vez y volvé a correr el Action."
+          }
+
+          foreach ($name in @("pcsx2.7z", "retroarch.7z")) {
+            $src = Join-Path $tmp $name
+            if (-not (Test-Path $src)) { throw "En Release vendor falta: $name" }
+            Copy-Item $src (Join-Path $packs $name) -Force
+          }
+
+          Get-ChildItem $tmp -Filter "*.blaze-bundle.json" -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName $packs -Force }
+
+          $biosZip = Join-Path $tmp "bios.7z"
+          if (Test-Path $biosZip) {
+            Write-Host "Extrayendo bios.7z..."
+            if (Get-Command 7z -ErrorAction SilentlyContinue) {
+              & 7z x $biosZip "-o$bios" -y | Out-Null
+            } else {
+              # Fallback: 7z no siempre está en PATH; usar Expand no sirve para .7z
+              choco install 7zip.install -y --no-progress
+              & "C:\Program Files\7-Zip\7z.exe" x $biosZip "-o$bios" -y | Out-Null
+            }
+          } else {
+            Write-Host "Sin bios.7z en vendor (instalador sin BIOS embebida)."
+          }
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish Release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.ver.outputs.tag }}
+          releaseName: Blaze ${{ steps.ver.outputs.tag }}
+          releaseBody: |
+            Instalador Windows (NSIS) generado por GitHub Actions.
+
+            Incluye packs de emuladores del Release `vendor`.
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis
