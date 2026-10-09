@@ -124,6 +124,8 @@ jobs:
           # Contenido de src-tauri/.updater/blaze.key (nunca al repo)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # URL del API (Railway). Vite la embebe en el build.
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         with:
           tagName: ${{ steps.ver.outputs.tag }}
           releaseName: Blaze ${{ steps.ver.outputs.tag }}
