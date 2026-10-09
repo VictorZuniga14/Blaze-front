@@ -1,0 +1,69 @@
+{
+  "runtimes": [
+    {
+      "id": "pcsx2",
+      "version": "2.8.2",
+      "url": "https://github.com/PCSX2/pcsx2/releases/download/v2.8.2/pcsx2-v2.8.2-windows-x64-Qt.7z",
+      "sha256": "7dfc829ca1994cc1045ac49f05e39b6cf968b72e6a374c40e05c2a2b4ac200b4",
+      "hash_origin": "github-digest",
+      "archive": "7z",
+      "exe": "pcsx2-qt.exe",
+      "strip_components": 0,
+      "platforms": ["PlayStation 2"],
+      "max_download_bytes": 67108864,
+      "max_extract_bytes": 268435456,
+      "max_extract_entries": 2000
+    },
+    {
+      "id": "retroarch",
+      "version": "1.22.2",
+      "url": "https://buildbot.libretro.com/stable/1.22.2/windows/x86_64/RetroArch.7z",
+      "sha256": "b2139b1d0f9d4526dc6b5ce23cbb3efdc766096fa6f2c3df016818b486ac6372",
+      "hash_origin": "computed-locally",
+      "archive": "7z",
+      "exe": "retroarch.exe",
+      "strip_components": 1,
+      "platforms": [
+        "NES",
+        "SNES",
+        "Game Boy",
+        "Game Boy Color",
+        "Game Boy Advance",
+        "Mega Drive",
+        "PlayStation",
+        "Nintendo 64",
+        "PlayStation Portable",
+        "GameCube",
+        "Wii",
+        "Nintendo DS"
+      ],
+      "max_download_bytes": 314572800,
+      "max_extract_bytes": 805306368,
+      "max_extract_entries": 30000,
+      "_comment_cores": "Un core por plataforma = primer candidato de RETROARCH_CORE_CANDIDATES (front/src/utils/retroArchCores.ts). Deduplicados: gambatte (GB+GBC), dolphin (GC+Wii).",
+      "cores": [
+        "fceumm_libretro.dll",
+        "snes9x_libretro.dll",
+        "gambatte_libretro.dll",
+        "mgba_libretro.dll",
+        "genesis_plus_gx_libretro.dll",
+        "swanstation_libretro.dll",
+        "mupen64plus_next_libretro.dll",
+        "ppsspp_libretro.dll",
+        "dolphin_libretro.dll",
+        "melonds_libretro.dll"
+      ],
+      "_comment_cores_pack": "HEAD 2026-10-09: ETag=\"2339407999\"; Last-Modified=Thu, 20 Nov 2025 02:52:43 GMT; Content-Length=229761684. sha256 computed-locally sobre el mismo artefacto.",
+      "cores_pack": {
+        "url": "https://buildbot.libretro.com/stable/1.22.2/windows/x86_64/RetroArch_cores.7z",
+        "sha256": "86b871e11b9b4772ac644b40a38f2c8e9449da1f355eae7da08aa061148547b0",
+        "hash_origin": "computed-locally",
+        "archive": "7z",
+        "strip_components": 1,
+        "max_download_bytes": 268435456,
+        "max_extract_bytes": 134217728,
+        "max_extract_entries": 32
+      }
+    }
+  ]
+}

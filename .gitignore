@@ -1,0 +1,43 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tauri
+src-tauri/target
+src-tauri/gen/schemas
+
+# Staging / packs de emuladores (generar con scripts/prepare-emulators.ps1 antes del build)
+src-tauri/resources/emulators/pcsx2/
+src-tauri/resources/emulators/retroarch/
+src-tauri/resources/emulators/packs/*.7z
+!src-tauri/resources/emulators/README.md
+!src-tauri/resources/emulators/packs/*.blaze-bundle.json
+
+# BIOS / firmware (no van al repo; van en el instalador local)
+src-tauri/resources/pcsx2/bios/**
+src-tauri/resources/retroarch/system/**
+!src-tauri/resources/pcsx2/bios/.gitkeep
+!src-tauri/resources/retroarch/system/.gitkeep
