@@ -6,7 +6,8 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      # Solo semver (v0.1.2). Evita que el tag "vendor" dispare el build.
+      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
       version:
