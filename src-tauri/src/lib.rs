@@ -48,6 +48,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(process_state)
         .invoke_handler(tauri::generate_handler![
             launch_native,
@@ -76,6 +77,10 @@ pub fn run() {
             apply_managed_ra_credentials
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             let show_i =
                 MenuItem::with_id(app, "show", "Abrir Blaze", true, None::<&str>)?;
             let quit_i =

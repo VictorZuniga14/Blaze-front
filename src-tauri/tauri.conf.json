@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -45,6 +46,17 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBDNTcyQUE5QzdCQUNBQzMKUldURHlyckhxU3BYRFBtbU9SejV0cDZad0hsYjRLUjQ1Rjc4TU9SMHl1SituQ01ZMGJ5VXQ2dmwK",
+      "endpoints": [
+        "https://github.com/VictorZuniga14/Blaze-front/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

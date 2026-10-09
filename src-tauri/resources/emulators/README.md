@@ -29,6 +29,16 @@ git push origin v0.1.2
 
 El workflow `.github/workflows/release.yml` baja esos packs, compila y publica el instalador en ese tag.
 
+## Updater (updates al abrir la app)
+
+1. Generá claves (una vez, local): `npx tauri signer generate -w src-tauri/.updater/blaze.key --ci`
+2. En GitHub → Settings → Secrets → Actions, creá:
+   - `TAURI_SIGNING_PRIVATE_KEY` = contenido de `blaze.key`
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = vacío si no pusiste password
+3. La pubkey va en `tauri.conf.json` → `plugins.updater.pubkey`
+
+**Repo privado:** GitHub no sirve `latest.json` / el `.exe` sin login. Para que el updater funcione hace falta repo público, o hospedar `latest.json` + instalador en un URL público (CDN/R2).
+
 ## Actualizaciones (sin reinstalar Blaze)
 
 1. Subís versión/URL/hash en `src-tauri/runtimes.manifest.json`

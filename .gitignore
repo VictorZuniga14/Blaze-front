@@ -28,6 +28,7 @@ dist-ssr
 # Tauri
 src-tauri/target
 src-tauri/gen/schemas
+src-tauri/.updater/
 
 # Staging / packs de emuladores (generar con scripts/prepare-emulators.ps1 antes del build)
 src-tauri/resources/emulators/pcsx2/
