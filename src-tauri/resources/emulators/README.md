@@ -35,6 +35,9 @@ El workflow `.github/workflows/release.yml` baja esos packs, compila y publica e
 2. En GitHub → Settings → Secrets → Actions, creá:
    - `TAURI_SIGNING_PRIVATE_KEY` = contenido de `blaze.key`
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = vacío si no pusiste password
+   - `VITE_API_URL` = URL del backend (Railway), sin `/` final
+   - `RELEASE_TOKEN` = PAT classic con scopes `repo` + `workflow`  
+     (hace falta si el commit del tag tocó `.github/workflows/`; si no, el Release falla con *Resource not accessible by integration*)
 3. La pubkey va en `tauri.conf.json` → `plugins.updater.pubkey`
 
 **Repo privado:** GitHub no sirve `latest.json` / el `.exe` sin login. Para que el updater funcione hace falta repo público, o hospedar `latest.json` + instalador en un URL público (CDN/R2).

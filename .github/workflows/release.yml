@@ -20,6 +20,8 @@ permissions:
 
 jobs:
   publish-tauri:
+    permissions:
+      contents: write
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,7 +122,9 @@ jobs:
       - name: Build and publish Release
         uses: tauri-apps/tauri-action@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Si el tag incluye cambios en .github/workflows/, GITHUB_TOKEN no puede
+          # crear el Release. Usá un PAT classic (scopes: repo + workflow) como RELEASE_TOKEN.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           # Contenido de src-tauri/.updater/blaze.key (nunca al repo)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
