@@ -468,7 +468,10 @@ fn read_bundle_meta_file(path: &Path) -> Option<BundleMeta> {
 }
 
 fn bundle_meta_matches(meta: &BundleMeta, entry: &RuntimeManifestEntry) -> bool {
-    meta.version == entry.version && meta.sha256.eq_ignore_ascii_case(&entry.sha256)
+    // Offline pack del instalador: alcanza con la misma versión.
+    // El sha256 del manifiesto es del zip/URL remoto; el de
+    // `*.blaze-bundle.json` es del `.7z` local (suelen diferir, p. ej. Eden).
+    meta.version == entry.version
 }
 
 fn finalize_bundled_install(

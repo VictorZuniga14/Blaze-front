@@ -289,10 +289,15 @@ async function restoreFromCatalog() {
     needsCloudRepair.value = false;
     contentInfo.value = `Descargado desde el catálogo · runtime ${result.runtimeName}`;
   } catch (err) {
-    pageError.value =
+    const raw =
       err instanceof Error
         ? err.message
-        : "No se pudo restaurar desde el catálogo.";
+        : typeof err === "string"
+          ? err
+          : null;
+    pageError.value = raw?.trim()
+      ? raw
+      : "No se pudo restaurar desde el catálogo.";
   } finally {
     repairingFromCloud.value = false;
     cloudRepairTitle.value = "DESCARGANDO";

@@ -53,6 +53,7 @@ const bannerSrc = computed(() => resolveGameBanner(game.value?.title));
 function userFacing(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.message) return err.message;
   if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err.trim()) return err;
   return fallback;
 }
 
