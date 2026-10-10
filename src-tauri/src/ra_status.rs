@@ -68,6 +68,8 @@ pub fn detect_kind(exe: &Path) -> &'static str {
         "pcsx2"
     } else if name.contains("retroarch") {
         "retroarch"
+    } else if name == "eden.exe" || name == "eden-cli.exe" || name.starts_with("eden") {
+        "eden"
     } else {
         "unknown"
     }
@@ -158,13 +160,18 @@ fn build_status(
     let kind_label = match emulator_kind {
         "pcsx2" => "PCSX2",
         "retroarch" => "RetroArch",
+        "eden" => "Eden",
         _ => "Emulador",
     };
 
-    let (status, status_label) = if emulator_kind == "unknown" {
+    let (status, status_label) = if emulator_kind == "unknown" || emulator_kind == "eden" {
         (
             "unsupported".to_string(),
-            "Emulador sin detector RA específico".to_string(),
+            if emulator_kind == "eden" {
+                "Eden (Switch): sin RetroAchievements en Blaze".to_string()
+            } else {
+                "Emulador sin detector RA específico".to_string()
+            },
         )
     } else if !executable_found {
         (

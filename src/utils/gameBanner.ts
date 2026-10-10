@@ -12,6 +12,10 @@ import bannerJackass from "../assets/banner_jackass_negro.png";
 import bannerBlack from "../assets/banner_black_foto_3840x1240.png";
 import bannerFifaStreet from "../assets/banner-fifastret.jpeg";
 import bannerWinningEleven from "../assets/winning-eleven.jpeg";
+import bannerSlug from "../assets/banner-slug.jpg";
+import bannerStreet from "../assets/banner-strett.jpg";
+import bannerMarioKart from "../assets/banner-mario-kart8.jpg";
+import bannerMarioBrosU from "../assets/mario-bros-u-banner.jpg";
 
 /**
  * Banner horizontal del detalle (no es la carátula 3:4).
@@ -22,6 +26,21 @@ export function resolveGameBanner(title: string | null | undefined): string | nu
   if (!t) return null;
   if (t.includes("crash bandicoot")) return bannerCrash;
   if (t.includes("donkey kong")) return bannerDonkeyKong;
+  if (t.includes("metal slug") || t.includes("metalslug")) return bannerSlug;
+  if (t.includes("street fighter") || t.includes("streetfighter")) {
+    return bannerStreet;
+  }
+  if (t.includes("mario kart") || t.includes("mariokart")) return bannerMarioKart;
+  if (
+    t.includes("mario bros u") ||
+    t.includes("mario bros. u") ||
+    t.includes("super mario bros u") ||
+    t.includes("super mario bros. u") ||
+    t.includes("new super mario") ||
+    t.includes("nsmbu")
+  ) {
+    return bannerMarioBrosU;
+  }
   if (t.includes("mario")) return bannerMario;
   if (t.includes("tony hawk")) return bannerTonyHawk;
   if (t.includes("jackass")) return bannerJackass;

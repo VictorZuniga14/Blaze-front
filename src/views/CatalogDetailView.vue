@@ -203,7 +203,6 @@ watch(catalogId, () => {
           Abrir en biblioteca
         </button>
         <p class="meta-line">
-          {{ game.publisherUsername }} ·
           {{ formatBytes(Number(game.fileSizeBytes)) }}
         </p>
       </section>

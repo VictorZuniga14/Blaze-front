@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
+import { open } from "@tauri-apps/plugin-dialog";
 import { usePcsx2RaStore } from "../stores/pcsx2Ra";
 import { useAuthStore } from "../stores/auth";
 import { retroAchievementsApiService } from "../services/retroAchievementsApi.service";
@@ -9,6 +10,13 @@ import {
   isPcsx2Runtime,
   isRetroArchRuntime,
 } from "../services/raEmulator.service";
+import {
+  importEdenFirmwareZip,
+  initializeBlazeEmulators,
+  openManagedEdenKeysFolder,
+  openManagedPcsx2BiosFolder,
+  type EmulatorSetupStatus,
+} from "../services/emulatorData.service";
 
 const router = useRouter();
 const ra = usePcsx2RaStore();
@@ -18,11 +26,74 @@ const { user } = storeToRefs(auth);
 
 const apiConfigured = ref<boolean | null>(null);
 const apiStatusError = ref<string | null>(null);
+const emuSetup = ref<EmulatorSetupStatus | null>(null);
+const emuBusy = ref(false);
+const emuMessage = ref<string | null>(null);
 
 onMounted(() => {
   void ra.refresh();
   void loadApiStatus();
+  void loadEmuSetup();
 });
+
+async function loadEmuSetup() {
+  try {
+    emuSetup.value = await initializeBlazeEmulators();
+  } catch {
+    emuSetup.value = null;
+  }
+}
+
+async function openEdenKeys() {
+  emuBusy.value = true;
+  emuMessage.value = null;
+  try {
+    const dir = await openManagedEdenKeysFolder();
+    emuMessage.value = `Carpeta keys: ${dir}`;
+    await loadEmuSetup();
+  } catch (e) {
+    emuMessage.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    emuBusy.value = false;
+  }
+}
+
+async function openPcsx2Bios() {
+  emuBusy.value = true;
+  emuMessage.value = null;
+  try {
+    const dir = await openManagedPcsx2BiosFolder();
+    emuMessage.value = `Carpeta BIOS: ${dir}`;
+    await loadEmuSetup();
+  } catch (e) {
+    emuMessage.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    emuBusy.value = false;
+  }
+}
+
+async function pickEdenFirmware() {
+  emuBusy.value = true;
+  emuMessage.value = null;
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Firmware Switch", extensions: ["zip"] }],
+    });
+    if (!selected || Array.isArray(selected)) {
+      return;
+    }
+    emuMessage.value =
+      "Importando firmware (puede tardar 1–2 min, no cierres Blaze)…";
+    const dest = await importEdenFirmwareZip(selected);
+    emuMessage.value = dest;
+    await loadEmuSetup();
+  } catch (e) {
+    emuMessage.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    emuBusy.value = false;
+  }
+}
 
 async function loadApiStatus() {
   apiStatusError.value = null;
@@ -43,6 +114,7 @@ async function refresh() {
 function kindLabel(kind: string): string {
   if (kind === "pcsx2") return "PCSX2";
   if (kind === "retroarch") return "RetroArch";
+  if (kind === "eden") return "Eden";
   return kind;
 }
 
@@ -98,6 +170,63 @@ function entryDot(statusCode: string): string {
         <span v-if="user.email" class="text-slate-500"> ({{ user.email }})</span>
       </p>
       <p v-else class="text-sm text-slate-400">Sin sesión.</p>
+    </section>
+
+    <section class="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-6">
+      <h2 class="mb-1 text-lg font-medium text-white">Emuladores (datos)</h2>
+      <p class="mb-4 text-sm text-slate-400">
+        La BIOS de PS2 viene con el instalador. Keys y firmware de Switch los
+        aportás vos (carpeta / importar zip).
+      </p>
+      <ul class="mb-4 space-y-2 text-sm text-slate-300">
+        <li>
+          PCSX2 BIOS:
+          <span :class="emuSetup?.pcsx2BiosFound ? 'text-emerald-400' : 'text-amber-300'">
+            {{ emuSetup?.pcsx2BiosFound ? "lista" : "faltante" }}
+          </span>
+        </li>
+        <li>
+          Eden keys (prod.keys):
+          <span :class="emuSetup?.edenKeysFound ? 'text-emerald-400' : 'text-amber-300'">
+            {{ emuSetup?.edenKeysFound ? "lista" : "faltante" }}
+          </span>
+        </li>
+        <li>
+          Eden firmware:
+          <span
+            :class="emuSetup?.edenFirmwareFound ? 'text-emerald-400' : 'text-amber-300'"
+          >
+            {{ emuSetup?.edenFirmwareFound ? "instalado" : "faltante" }}
+          </span>
+        </li>
+      </ul>
+      <p v-if="emuMessage" class="mb-3 text-xs text-slate-400">{{ emuMessage }}</p>
+      <div class="flex flex-wrap gap-3">
+        <button
+          type="button"
+          class="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/5 disabled:opacity-50"
+          :disabled="emuBusy"
+          @click="openPcsx2Bios"
+        >
+          Abrir carpeta BIOS PCSX2
+        </button>
+        <button
+          type="button"
+          class="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/5 disabled:opacity-50"
+          :disabled="emuBusy"
+          @click="openEdenKeys"
+        >
+          Abrir carpeta keys Eden
+        </button>
+        <button
+          type="button"
+          class="rounded-lg bg-violet-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-400 disabled:opacity-50"
+          :disabled="emuBusy"
+          @click="pickEdenFirmware"
+        >
+          Importar firmware Switch (.zip)
+        </button>
+      </div>
     </section>
 
     <section class="rounded-2xl border border-white/10 bg-slate-900/50 p-6">

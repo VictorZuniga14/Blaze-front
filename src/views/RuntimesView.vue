@@ -71,9 +71,17 @@ async function save() {
   saving.value = true;
   formError.value = null;
   try {
+    const exeLower = form.executablePath.toLowerCase();
+    const inferredType = exeLower.includes("eden")
+      ? "eden"
+      : exeLower.includes("pcsx2")
+        ? "pcsx2"
+        : exeLower.includes("retroarch")
+          ? "retroarch"
+          : "generic";
     const input = {
       name: form.name,
-      type: "generic",
+      type: inferredType,
       executablePath: form.executablePath,
     };
     if (editingId.value) {

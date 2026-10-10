@@ -21,6 +21,7 @@ const ALLOWED_HOSTS: &[&str] = &[
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
     "buildbot.libretro.com",
+    "git.eden-emu.dev",
 ];
 
 /// Windows `FILE_ATTRIBUTE_REPARSE_POINT` — usado por 7z para marcar symlinks.
@@ -1511,6 +1512,14 @@ mod tests {
         let entries = manifest_entries().unwrap();
         assert!(entries.iter().any(|e| e.id == "pcsx2"));
         assert!(entries.iter().any(|e| e.id == "retroarch"));
+        assert!(entries.iter().any(|e| e.id == "eden"));
+        let eden = lookup_manifest("eden").unwrap();
+        assert_eq!(eden.exe, "eden.exe");
+        assert_eq!(
+            eden.sha256,
+            "ff498e5da9630216926ac3cbe9fb493b14930665c728a40a8f5b59507fdd7ebf"
+        );
+        assert!(eden.platforms.iter().any(|p| p == "Nintendo Switch"));
         let pcsx2 = lookup_manifest("pcsx2").unwrap();
         assert_eq!(pcsx2.hash_origin, HashOrigin::GithubDigest);
         assert_eq!(
@@ -1539,6 +1548,10 @@ mod tests {
         .is_ok());
         assert!(validate_url(
             "https://buildbot.libretro.com/stable/1.22.2/windows/x86_64/RetroArch.7z"
+        )
+        .is_ok());
+        assert!(validate_url(
+            "https://git.eden-emu.dev/eden-emu/eden/releases/download/v0.2.1/Eden-Windows-v0.2.1-amd64-msvc-standard.zip"
         )
         .is_ok());
     }

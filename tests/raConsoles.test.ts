@@ -6,6 +6,7 @@ import {
   resolveRaConsole,
   supportsRaIdentify,
 } from "../src/utils/raConsoles";
+import { runtimeKindForPlatform } from "../src/utils/platformRuntime";
 
 describe("raConsoles", () => {
   it("IDs oficiales clave", () => {
@@ -56,5 +57,12 @@ describe("raConsoles", () => {
     assert.equal(supportsRaIdentify("snes"), true);
     assert.equal(supportsRaIdentify("psp"), true);
     assert.equal(supportsRaIdentify("gamecube"), false);
+    assert.equal(supportsRaIdentify("switch"), false);
+  });
+
+  it("Nintendo Switch → Eden", () => {
+    assert.equal(platformToRaConsoleKey("Nintendo Switch"), "switch");
+    assert.equal(runtimeKindForPlatform("Nintendo Switch"), "eden");
+    assert.equal(RA_CONSOLES.switch, 53);
   });
 });

@@ -56,8 +56,10 @@ async function defaultManifestVersion(id: string): Promise<string | null> {
   return list.find((e) => e.id === id)?.version ?? null;
 }
 
-function displayName(kind: "pcsx2" | "retroarch"): string {
-  return kind === "pcsx2" ? "PCSX2" : "RetroArch";
+function displayName(kind: "pcsx2" | "retroarch" | "eden"): string {
+  if (kind === "pcsx2") return "PCSX2";
+  if (kind === "eden") return "Eden";
+  return "RetroArch";
 }
 
 function needsManagedUpdate(
@@ -137,8 +139,8 @@ export async function ensureRuntime(
 export async function ensureDefaultRuntimes(
   deps?: Partial<InstallDeps>,
 ): Promise<void> {
-  // Una plataforma por runtime cubre pcsx2 + retroarch.
-  const platforms = ["PlayStation 2", "NES"] as const;
+  // Una plataforma por runtime cubre pcsx2 + retroarch + eden.
+  const platforms = ["PlayStation 2", "NES", "Nintendo Switch"] as const;
   const errors: string[] = [];
   for (const platform of platforms) {
     try {

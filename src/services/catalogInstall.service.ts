@@ -3,7 +3,8 @@ import { catalogApiService } from "./catalogApi.service";
 import {
   catalogGamesDir,
   downloadFile,
-  extractZipArchive,
+  extractCatalogZip,
+  installEdenTitleNsps,
   joinPath,
   listenTransferProgress,
   removePath,
@@ -38,7 +39,11 @@ async function pathExists(path: string): Promise<boolean> {
 async function downloadCatalogPayload(
   catalog: CatalogGame,
   onProgress?: (p: CatalogInstallProgress) => void,
-): Promise<{ destPath: string; coverLocalPath: string | null }> {
+): Promise<{
+  destPath: string;
+  coverLocalPath: string | null;
+  installPaths: string[];
+}> {
   const dl = await catalogApiService.downloadUrl(catalog.id);
   const bytesTotal = Number(dl.fileSizeBytes) || 0;
   const transferId = crypto.randomUUID();
@@ -97,14 +102,17 @@ async function downloadCatalogPayload(
   }
 
   let playablePath = destPath;
+  let installPaths: string[] = [];
   if (/\.zip$/i.test(destPath)) {
     onProgress?.({
       phase: "installing",
       bytesDone: bytesTotal,
       bytesTotal,
-      message: "Descomprimiendo .cue + .bin…",
+      message: "Descomprimiendo paquete del catálogo…",
     });
-    playablePath = await extractZipArchive(destPath, gameDir);
+    const extracted = await extractCatalogZip(destPath, gameDir);
+    playablePath = extracted.primaryPath;
+    installPaths = extracted.installPaths;
     try {
       await removePath(destPath);
     } catch {
@@ -112,7 +120,7 @@ async function downloadCatalogPayload(
     }
   }
 
-  return { destPath: playablePath, coverLocalPath };
+  return { destPath: playablePath, coverLocalPath, installPaths };
 }
 
 /**
@@ -195,10 +203,22 @@ export const catalogInstallService = {
     });
     const runtime = await ensureRuntime(platform);
 
-    const { destPath, coverLocalPath } = await downloadCatalogPayload(
-      catalog,
-      onProgress,
-    );
+    const { destPath, coverLocalPath, installPaths } =
+      await downloadCatalogPayload(catalog, onProgress);
+
+    if (installPaths.length > 0) {
+      onProgress?.({
+        phase: "installing",
+        bytesDone: 0,
+        bytesTotal: 0,
+        message: `Instalando ${installPaths.length} update/DLC en Eden…`,
+      });
+      try {
+        await installEdenTitleNsps(runtime.executablePath, installPaths);
+      } catch (e) {
+        console.warn("[catalog] Eden install update/DLC:", e);
+      }
+    }
 
     onProgress?.({
       phase: "installing",

@@ -1,5 +1,6 @@
 # Publica el instalador Blaze (Windows NSIS) al pushear un tag v* o desde Actions.
-# Requisito: Release fijo "vendor" con pcsx2.7z + retroarch.7z (y opcional bios.7z).
+# Requisito: Release fijo "vendor" con pcsx2.7z + retroarch.7z + bios.7z
+# (bios.7z se extrae a resources/pcsx2/bios y va en el instalador).
 
 name: Release
 
@@ -79,28 +80,30 @@ jobs:
             throw "Falta el Release 'vendor' con pcsx2.7z y retroarch.7z. Crealo una vez y volvé a correr el Action."
           }
 
-          foreach ($name in @("pcsx2.7z", "retroarch.7z")) {
+          foreach ($name in @("pcsx2.7z", "retroarch.7z", "bios.7z")) {
             $src = Join-Path $tmp $name
             if (-not (Test-Path $src)) { throw "En Release vendor falta: $name" }
-            Copy-Item $src (Join-Path $packs $name) -Force
+            if ($name -ne "bios.7z") {
+              Copy-Item $src (Join-Path $packs $name) -Force
+            }
           }
 
           Get-ChildItem $tmp -Filter "*.blaze-bundle.json" -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName $packs -Force }
 
           $biosZip = Join-Path $tmp "bios.7z"
-          if (Test-Path $biosZip) {
-            Write-Host "Extrayendo bios.7z..."
-            if (Get-Command 7z -ErrorAction SilentlyContinue) {
-              & 7z x $biosZip "-o$bios" -y | Out-Null
-            } else {
-              # Fallback: 7z no siempre está en PATH; usar Expand no sirve para .7z
-              choco install 7zip.install -y --no-progress
-              & "C:\Program Files\7-Zip\7z.exe" x $biosZip "-o$bios" -y | Out-Null
-            }
+          Write-Host "Extrayendo bios.7z → resources/pcsx2/bios (va en el instalador)..."
+          if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            & 7z x $biosZip "-o$bios" -y | Out-Null
           } else {
-            Write-Host "Sin bios.7z en vendor (instalador sin BIOS embebida)."
+            choco install 7zip.install -y --no-progress
+            & "C:\Program Files\7-Zip\7z.exe" x $biosZip "-o$bios" -y | Out-Null
           }
+          $biosCount = @(Get-ChildItem $bios -File -ErrorAction SilentlyContinue).Count
+          if ($biosCount -lt 1) {
+            throw "bios.7z no dejó archivos en $bios"
+          }
+          Write-Host "BIOS embebidas: $biosCount archivo(s)"
 
       - name: Setup Node
         uses: actions/setup-node@v4

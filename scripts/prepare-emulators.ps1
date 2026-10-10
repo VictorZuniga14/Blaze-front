@@ -6,6 +6,9 @@
 param(
   [string]$Pcsx2Path = "C:\Users\viczo\OneDrive\Escritorio\pcsx2-v2.8.2-windows-x64-Qt",
   [string]$RetroArchPath = "C:\RetroArch-Win64",
+  [string]$EdenPath = "C:\Users\viczo\OneDrive\Escritorio\Eden",
+  # Dump(s) PS2 para el instalador (Release vendor → bios.7z). Por defecto: carpeta bios de PCSX2.
+  [string]$BiosPath = "",
   [string]$SevenZip = "C:\Program Files\NVIDIA Corporation\NVIDIA app\7z.exe"
 )
 
@@ -88,8 +91,55 @@ if (Test-Path $raPack) { Remove-Item $raPack -Force }
 & $SevenZip a -t7z -mx=5 -mmt=on "-xr!shaders" $raPack "$stagingRa\*" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "7z retroarch falló: $LASTEXITCODE" }
 
+if (Test-Path (Join-Path $EdenPath "eden.exe")) {
+  Write-Host "Creando eden.7z..."
+  $edenPack = Join-Path $packs "eden.7z"
+  if (Test-Path $edenPack) { Remove-Item $edenPack -Force }
+  $edenFiles = @(
+    "eden.exe", "eden-cli.exe", "eden-room.exe",
+    "Qt6Core.dll", "Qt6Gui.dll", "Qt6Network.dll", "Qt6Svg.dll", "Qt6Widgets.dll",
+    "LICENSE.txt", "README.md"
+  ) | ForEach-Object { Join-Path $EdenPath $_ } | Where-Object { Test-Path $_ }
+  & $SevenZip a -t7z -mx=5 -mmt=on $edenPack @edenFiles | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "7z eden falló: $LASTEXITCODE" }
+  $hash = (Get-FileHash $edenPack -Algorithm SHA256).Hash.ToLowerInvariant()
+  $entry = $manifest.runtimes | Where-Object { $_.id -eq "eden" }
+  $ver = if ($entry) { $entry.version } else { "0.1.0" }
+  $meta = @{ version = $ver; sha256 = $hash } | ConvertTo-Json
+  Set-Content -Encoding utf8 (Join-Path $packs "eden.blaze-bundle.json") -Value $meta
+  Write-Host "Actualizá sha256 de eden en runtimes.manifest.json si cambió: $hash"
+} else {
+  Write-Host "Omitiendo Eden (no hay eden.exe en $EdenPath)"
+}
+
+# BIOS PS2 → resources/pcsx2/bios + packs/bios.7z (obligatorio en Release vendor).
+if (-not $BiosPath) {
+  $BiosPath = Join-Path $Pcsx2Path "bios"
+}
+$biosDest = Join-Path $root "src-tauri\resources\pcsx2\bios"
+New-Item -ItemType Directory -Force -Path $biosDest | Out-Null
+if (Test-Path $BiosPath) {
+  Write-Host "Copiando BIOS PS2 desde $BiosPath..."
+  Get-ChildItem $biosDest -File -ErrorAction SilentlyContinue | Remove-Item -Force
+  robocopy $BiosPath $biosDest /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "robocopy BIOS falló: $LASTEXITCODE" }
+  $biosFiles = @(Get-ChildItem $biosDest -File -ErrorAction SilentlyContinue)
+  if ($biosFiles.Count -lt 1) {
+    throw "No hay archivos de BIOS en $BiosPath"
+  }
+  Write-Host "Creando bios.7z..."
+  $biosPack = Join-Path $packs "bios.7z"
+  if (Test-Path $biosPack) { Remove-Item $biosPack -Force }
+  & $SevenZip a -t7z -mx=5 -mmt=on $biosPack "$biosDest\*" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "7z bios falló: $LASTEXITCODE" }
+} else {
+  Write-Host "ADVERTENCIA: no hay carpeta BIOS en $BiosPath"
+  Write-Host "  Pasá -BiosPath o subí bios.7z al Release vendor a mano."
+}
+
 Write-Host "Listo. Packs para el instalador:"
 Get-ChildItem $packs | ForEach-Object {
   "{0,-32} {1,8:N1} MB" -f $_.Name, ($_.Length / 1MB)
 }
+Write-Host "Subí pcsx2.7z + retroarch.7z + bios.7z (+ eden.7z opcional) al Release tag vendor."
 Write-Host "Volvé a correr: npm run tauri -- build"

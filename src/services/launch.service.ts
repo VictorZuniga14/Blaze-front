@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { launchConfigService } from "./launchConfig.service";
 import { gameRepository } from "../repositories/game.repository";
 import { runtimeRepository } from "../repositories/runtime.repository";
+import { isEdenRuntime } from "./ra/adapterKind";
 import { resolveRetroArchLaunchArguments } from "../utils/platformRuntime";
 import type {
   ActiveProcess,
@@ -27,6 +28,7 @@ export const launchService = {
 
     let executablePath: string | null = null;
     let argumentsForLaunch = [...config.arguments];
+    let workingDirectory = config.workingDirectory;
 
     if (config.type === "native") {
       executablePath = config.executablePath;
@@ -39,6 +41,15 @@ export const launchService = {
         throw new Error("El runtime configurado ya no está disponible.");
       }
       executablePath = runtime.executablePath;
+      if (isEdenRuntime(runtime)) {
+        const slash = Math.max(
+          executablePath.lastIndexOf("\\"),
+          executablePath.lastIndexOf("/"),
+        );
+        if (slash > 0) {
+          workingDirectory = executablePath.slice(0, slash);
+        }
+      }
 
       const contentPath = config.contentPath?.trim() ?? "";
       if (!contentPath) {
@@ -98,7 +109,7 @@ export const launchService = {
     return invoke<ActiveProcess>("launch_native", {
       gameId: config.gameId,
       executablePath,
-      workingDirectory: config.workingDirectory,
+      workingDirectory,
       arguments: argumentsForLaunch,
     });
   },

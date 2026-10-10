@@ -6,7 +6,9 @@ import {
   downloadFile,
   joinPath,
   listenTransferProgress,
+  listSwitchExtras,
   packCueBundle,
+  packSwitchBundle,
   pathFileSize,
   putFileRange,
   removePath,
@@ -64,6 +66,7 @@ function platformFromContentExt(contentPath: string): RaConsoleKey | null {
   if (ext === "gbc") return "gbc";
   if (ext === "n64" || ext === "z64" || ext === "v64") return "n64";
   if (ext === "cso" || ext === "pbp") return "psp";
+  if (ext === "nsp" || ext === "xci") return "switch";
   return null;
 }
 
@@ -82,13 +85,16 @@ async function resolveCatalogPlatform(input: {
     const runtime = await runtimeRepository.findById(input.runtimeId);
     const kind = resolveRaAdapterKind(runtime);
     if (kind === "pcsx2") inferredKey = "ps2";
+    if (!inferredKey && runtime?.type?.toLowerCase() === "eden") {
+      inferredKey = "switch";
+    }
   }
   if (!inferredKey) {
     inferredKey = platformFromContentExt(input.contentPath);
   }
   if (!inferredKey || !runtimeKindForPlatform(RA_CONSOLE_LABELS[inferredKey])) {
     throw new Error(
-      "El juego necesita plataforma (ej. PlayStation 2). Editá el juego y guardala, o usá un runtime PCSX2/RetroArch.",
+      "El juego necesita plataforma (ej. PlayStation 2 o Nintendo Switch). Editá el juego y guardala, o usá un runtime PCSX2/RetroArch/Eden.",
     );
   }
 
@@ -333,6 +339,10 @@ export const catalogPublishService = {
     let uploadPath = contentPath;
     let tempZipToDelete: string | null = null;
     const isCue = /\.cue$/i.test(contentPath);
+    const isSwitch =
+      runtimeKindForPlatform(platform) === "eden" ||
+      /\.nsp$/i.test(contentPath) ||
+      /\.xci$/i.test(contentPath);
     if (isCue) {
       onProgress?.({
         phase: "preparing",
@@ -346,6 +356,43 @@ export const catalogPublishService = {
       const destZip = await joinPath(packsDir, `${baseName}.zip`);
       uploadPath = await packCueBundle(contentPath, destZip);
       tempZipToDelete = uploadPath;
+    } else if (isSwitch) {
+      const extras = await listSwitchExtras(contentPath);
+      if (extras.length > 0) {
+        onProgress?.({
+          phase: "preparing",
+          bytesDone: 0,
+          bytesTotal: 0,
+          message: `Empaquetando Switch + ${extras.length} update/DLC (puede tardar)…`,
+        });
+        const baseDir = await catalogGamesDir();
+        const packsDir = await joinPath(baseDir, "_packs");
+        const baseName = fileNameFromPath(contentPath).replace(
+          /\.(nsp|xci)$/i,
+          "",
+        );
+        const destZip = await joinPath(packsDir, `${baseName}.switch.zip`);
+        const packTransferId = `${transferId}-pack`;
+        const unlistenPack = await listenTransferProgress(packTransferId, (p) => {
+          onProgress?.({
+            phase: "preparing",
+            bytesDone: p.bytesDone,
+            bytesTotal: p.bytesTotal,
+            message: `Empaquetando Switch + ${extras.length} update/DLC…`,
+          });
+        });
+        try {
+          uploadPath = await packSwitchBundle(
+            contentPath,
+            extras,
+            destZip,
+            packTransferId,
+          );
+        } finally {
+          unlistenPack();
+        }
+        tempZipToDelete = uploadPath;
+      }
     }
 
     const fileSizeBytes = await pathFileSize(uploadPath);

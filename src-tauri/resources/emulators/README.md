@@ -5,8 +5,11 @@ Si esa versión ya está instalada (`.installed.json`), no se vuelve a copiar.
 
 ## Qué poner aquí
 
-- `pcsx2/` con `pcsx2-qt.exe` y dependencias (sin BIOS)
+- `pcsx2/` con `pcsx2-qt.exe` y dependencias (sin BIOS en ese pack)
 - `retroarch/` con `retroarch.exe`, DLLs y cores en `cores/`
+- `eden/` con `eden.exe` y dependencias (sin keys ni firmware Switch)
+- BIOS PS2: `resources/pcsx2/bios/` (o `packs/bios.7z` en Release vendor) → va en el instalador
+- (opcional packs) `packs/eden.7z` o `.zip` alineado con `runtimes.manifest.json`
 
 ```powershell
 .\scripts\prepare-emulators.ps1
@@ -18,7 +21,13 @@ Los `.7z` no van al repo. Una sola vez creá un Release con tag **`vendor`** y s
 
 - `pcsx2.7z`
 - `retroarch.7z`
-- (opcional) `bios.7z` → contenido para `resources/pcsx2/bios/`
+- `bios.7z` → **obligatorio**; se extrae a `resources/pcsx2/bios/` y el cliente recibe la BIOS con el instalador
+- (opcional) `eden.7z` → bootstrap offline de Eden
+
+```powershell
+.\scripts\prepare-emulators.ps1   # genera pcsx2/retroarch/bios(/eden).7z
+# Después subí esos .7z al Release tag "vendor"
+```
 
 Después, cada vez:
 
@@ -50,7 +59,19 @@ El workflow `.github/workflows/release.yml` baja esos packs, compila y publica e
 
 El bundle del instalador es solo el primer arranque offline. No hace falta redistribuir el instalador completo para cada update de emulador.
 
+## Eden (Nintendo Switch)
+
+Runtime managed `eden` (mismo flujo que PCSX2/RetroArch):
+
+1. Pack offline: `packs/eden.7z` + `eden.blaze-bundle.json` (o descarga si el host responde).
+2. Keys: Configuración → **Abrir carpeta keys Eden** → pegá `prod.keys` / `title.keys`.
+3. Firmware: Configuración → **Importar firmware Switch (.zip)** (`.nca` en el zip).
+4. Juegos: plataforma `Nintendo Switch`, contenido `.nsp` / `.xci`.
+
+No meter keys ni firmware en el instalador público.
+
 ## Licencias
 
-- **PCSX2 / RetroArch / cores**: GPL (u otras OSS). Redistribuir binarios implica cumplir la licencia (aviso, oferta de código fuente, etc.).
-- **BIOS / firmware de consolas (Sony, etc.)**: no redistribuir. El usuario debe aportar su propio dump legal; Blaze solo abre la carpeta managed.
+- **PCSX2 / RetroArch / Eden / cores**: GPL (u otras OSS). Redistribuir binarios implica cumplir la licencia (aviso, oferta de código fuente, etc.).
+- **BIOS PS2**: Blaze la incluye en el instalador vía `bios.7z` del Release vendor (uso privado / amigos). No subir dumps al repo git.
+- **Keys / firmware Switch**: no van en el instalador; cada máquina los aporta en Configuración.

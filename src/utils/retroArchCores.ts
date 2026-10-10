@@ -33,6 +33,8 @@ export const RETROARCH_CORE_CANDIDATES: Record<
   gamecube: ["dolphin_libretro.dll"],
   wii: ["dolphin_libretro.dll"],
   nds: ["melonds_libretro.dll", "desmume_libretro.dll"],
+  /** Switch usa Eden managed, no RetroArch. */
+  switch: [],
 };
 
 /** DLL que Blaze instala desde RetroArch_cores.7z (primer candidato por plataforma). */

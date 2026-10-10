@@ -34,12 +34,57 @@ export async function packCueBundle(
   return invoke<string>("pack_cue_bundle", { cuePath, destZip });
 }
 
+/** Empaqueta base Switch + update/DLC + blaze-switch.json (con progreso). */
+export async function packSwitchBundle(
+  basePath: string,
+  extraPaths: string[],
+  destZip: string,
+  transferId: string,
+): Promise<string> {
+  return invoke<string>("pack_switch_bundle", {
+    transferId,
+    basePath,
+    extraPaths,
+    destZip,
+  });
+}
+
+/** Otros .nsp/.xci en la misma carpeta que la base. */
+export async function listSwitchExtras(basePath: string): Promise<string[]> {
+  return invoke<string[]>("list_switch_extras", { basePath });
+}
+
 /** Extrae zip del catálogo; devuelve ruta al .cue (o primer archivo). */
 export async function extractZipArchive(
   zipPath: string,
   destDir: string,
 ): Promise<string> {
   return invoke<string>("extract_zip_archive", { zipPath, destDir });
+}
+
+export type CatalogZipExtract = {
+  primaryPath: string;
+  installPaths: string[];
+  hasManifest: boolean;
+};
+
+/** Extrae zip; si hay blaze-switch.json, primary=base e install=update/DLC. */
+export async function extractCatalogZip(
+  zipPath: string,
+  destDir: string,
+): Promise<CatalogZipExtract> {
+  return invoke<CatalogZipExtract>("extract_catalog_zip", { zipPath, destDir });
+}
+
+/** Instala NSP update/DLC en Eden (best-effort CLI + carpeta pending). */
+export async function installEdenTitleNsps(
+  edenExecutable: string,
+  nspPaths: string[],
+): Promise<string> {
+  return invoke<string>("install_eden_title_nsps", {
+    edenExecutable,
+    nspPaths,
+  });
 }
 
 export async function removePath(path: string): Promise<void> {

@@ -17,6 +17,8 @@ export const RA_CONSOLES = {
   gamecube: 16,
   wii: 19,
   nds: 18,
+  /** Oficial rcheevos: Nintendo Switch. Identify RA fuera del MVP Blaze. */
+  switch: 53,
 } as const;
 
 export type RaConsoleKey = keyof typeof RA_CONSOLES;
@@ -35,6 +37,7 @@ export const RA_CONSOLE_LABELS: Record<RaConsoleKey, string> = {
   gamecube: "GameCube",
   wii: "Wii",
   nds: "Nintendo DS",
+  switch: "Nintendo Switch",
 };
 
 /** Consolas con hashing rcheevos habilitado en Blaze. */
@@ -66,6 +69,7 @@ export const RA_CONSOLE_EXTENSIONS: Record<RaConsoleKey, readonly string[]> = {
   gamecube: ["iso", "gcm", "gcz", "rvz", "wia"],
   wii: ["iso", "wbfs", "rvz", "wia", "gcz"],
   nds: ["nds", "dsi"],
+  switch: ["nsp", "xci"],
 };
 
 /**
@@ -87,9 +91,10 @@ const PLATFORM_ALIASES: Array<{ match: RegExp; key: RaConsoleKey }> = [
   { match: /gamecube|\bgc\b/i, key: "gamecube" },
   { match: /\bwii\b/i, key: "wii" },
   { match: /\bnds\b|nintendo\s*ds/i, key: "nds" },
+  { match: /nintendo\s*switch|\bswitch\b/i, key: "switch" },
 ];
 
-export type RaRuntimeKind = "pcsx2" | "retroarch";
+export type RaRuntimeKind = "pcsx2" | "retroarch" | "eden";
 
 export type ResolveRaConsoleInput = {
   platform?: string | null;

@@ -8,8 +8,9 @@ mod emulator_data;
 mod runtime_install;
 
 use catalog_transfer::{
-    catalog_games_dir, extract_zip_archive, http_download_file, http_put_file_range, join_path,
-    pack_cue_bundle, path_file_size, remove_path,
+    catalog_games_dir, extract_catalog_zip, extract_zip_archive, http_download_file,
+    http_put_file_range, join_path, list_switch_extras, pack_cue_bundle, pack_switch_bundle,
+    path_file_size, remove_path,
 };
 use pcsx2_ra::{inspect_pcsx2_retroachievements, open_pcsx2_for_configuration};
 use process_manager::{
@@ -18,7 +19,8 @@ use process_manager::{
 use ra_identify::identify_ra_content;
 use ra_status::{inspect_emulator_retroachievements, open_emulator_for_configuration};
 use emulator_data::{
-    apply_managed_ra_credentials, initialize_emulator_data, open_managed_pcsx2_bios_folder,
+    apply_managed_ra_credentials, import_eden_firmware_zip, initialize_emulator_data,
+    install_eden_title_nsps, open_managed_eden_keys_folder, open_managed_pcsx2_bios_folder,
     prepare_runtime_launch,
 };
 use runtime_install::{
@@ -65,7 +67,10 @@ pub fn run() {
             path_file_size,
             join_path,
             pack_cue_bundle,
+            pack_switch_bundle,
+            list_switch_extras,
             extract_zip_archive,
+            extract_catalog_zip,
             remove_path,
             install_runtime,
             cancel_runtime_install,
@@ -73,6 +78,9 @@ pub fn run() {
             runtime_manifest_list,
             prepare_runtime_launch,
             open_managed_pcsx2_bios_folder,
+            open_managed_eden_keys_folder,
+            import_eden_firmware_zip,
+            install_eden_title_nsps,
             initialize_emulator_data,
             apply_managed_ra_credentials
         ])

@@ -179,6 +179,40 @@ describe("ensureRuntime", () => {
     assert.equal(result.version, "1.22.2");
   });
 
+  it("Nintendo Switch instala runtime eden", async () => {
+    let installs = 0;
+    const result = await ensureRuntime("Nintendo Switch", {
+      pathExists: async () => false,
+      listRuntimes: async () => [] as Runtime[],
+      manifestVersion: async () => "0.2.1",
+      installRuntime: async (id) => {
+        installs += 1;
+        assert.equal(id, "eden");
+        return {
+          id: "eden",
+          version: "0.2.1",
+          executablePath:
+            "C:\\AppData\\Blaze\\runtimes\\eden\\0.2.1\\eden.exe",
+          rootPath: "C:\\AppData\\Blaze\\runtimes\\eden\\0.2.1",
+        };
+      },
+      upsertManaged: async (input) =>
+        runtime({
+          id: "managed-eden",
+          type: input.type,
+          name: input.name,
+          executablePath: input.executablePath,
+          source: "managed",
+          version: input.version,
+        }),
+    });
+
+    assert.equal(installs, 1);
+    assert.equal(result.type, "eden");
+    assert.equal(result.name, "Eden");
+    assert.equal(result.version, "0.2.1");
+  });
+
   it("managed al día con el manifiesto: no reinstala", async () => {
     let installs = 0;
     const current = runtime({

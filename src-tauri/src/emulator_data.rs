@@ -12,6 +12,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tauri::{path::BaseDirectory, AppHandle, Manager};
+use zip::ZipArchive;
 
 pub const MANAGED_DATA_DIR: &str = "emulator-data";
 
@@ -63,6 +64,8 @@ pub struct RuntimeLaunchPlan {
 #[derive(Debug)]
 pub enum LaunchPrepError {
     BiosMissing { bios_dir: PathBuf },
+    KeysMissing { keys_dir: PathBuf },
+    FirmwareMissing { firmware_dir: PathBuf },
     Io(String),
 }
 
@@ -72,10 +75,26 @@ impl LaunchPrepError {
             Self::BiosMissing { bios_dir } => RuntimeLaunchPlan {
                 arguments: vec![],
                 error: Some(format!(
-                    "No hay BIOS de PS2 válida en {}. Copiá un dump oficial en esa carpeta; Blaze no descarga BIOS.",
+                    "No hay BIOS de PS2 en {}. El instalador debería incluirla; si falta, pegá un dump en esa carpeta o reinstalá Blaze.",
                     bios_dir.display()
                 )),
                 error_code: Some("BiosMissing".to_string()),
+            },
+            Self::KeysMissing { keys_dir } => RuntimeLaunchPlan {
+                arguments: vec![],
+                error: Some(format!(
+                    "Faltan keys de Switch (prod.keys) en {}. Abrí la carpeta desde Configuración y pegá tus keys; Blaze no las redistribuye.",
+                    keys_dir.display()
+                )),
+                error_code: Some("KeysMissing".to_string()),
+            },
+            Self::FirmwareMissing { firmware_dir } => RuntimeLaunchPlan {
+                arguments: vec![],
+                error: Some(format!(
+                    "Falta firmware de Switch en {}. Importalo desde Configuración (zip .nca); Blaze no lo incluye en el instalador.",
+                    firmware_dir.display()
+                )),
+                error_code: Some("FirmwareMissing".to_string()),
             },
             Self::Io(m) => RuntimeLaunchPlan {
                 arguments: vec![],
@@ -174,6 +193,11 @@ pub fn resolve_emulator_paths(
                 pcsx2_data_root: None,
                 retroarch_cfg: Some(managed.join("retroarch.cfg")),
             },
+            "eden" => ResolvedEmulatorPaths {
+                blaze_managed_root: Some(managed),
+                pcsx2_data_root: None,
+                retroarch_cfg: None,
+            },
             _ => ResolvedEmulatorPaths {
                 blaze_managed_root: Some(managed),
                 pcsx2_data_root: None,
@@ -191,6 +215,11 @@ pub fn resolve_emulator_paths(
                 blaze_managed_root: None,
                 pcsx2_data_root: None,
                 retroarch_cfg: resolve_retroarch_cfg_manual(exe),
+            },
+            "eden" => ResolvedEmulatorPaths {
+                blaze_managed_root: exe.parent().map(|p| p.join("user")),
+                pcsx2_data_root: None,
+                retroarch_cfg: None,
             },
             _ => ResolvedEmulatorPaths {
                 blaze_managed_root: None,
@@ -287,9 +316,101 @@ pub fn ensure_managed_data_layout(
                 }
             }
         }
+        "eden" => {
+            if let Some(root) = paths.blaze_managed_root.as_ref() {
+                seed_eden_managed_layout(root)?;
+            }
+        }
         _ => {}
     }
     Ok(())
+}
+
+pub fn eden_keys_dir(managed_root: &Path) -> PathBuf {
+    managed_root.join("keys")
+}
+
+pub fn eden_firmware_registered_dir(managed_root: &Path) -> PathBuf {
+    managed_root
+        .join("nand")
+        .join("system")
+        .join("Contents")
+        .join("registered")
+}
+
+pub fn seed_eden_managed_layout(managed_root: &Path) -> Result<(), LaunchPrepError> {
+    fs::create_dir_all(eden_keys_dir(managed_root))
+        .map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+    fs::create_dir_all(eden_firmware_registered_dir(managed_root))
+        .map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+    Ok(())
+}
+
+pub fn has_eden_prod_keys(keys_dir: &Path) -> bool {
+    let prod = keys_dir.join("prod.keys");
+    prod.is_file()
+        && fs::metadata(&prod)
+            .map(|m| m.len() > 32)
+            .unwrap_or(false)
+}
+
+pub fn has_eden_firmware(registered_dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(registered_dir) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.path()
+            .extension()
+            .and_then(|x| x.to_str())
+            .map(|x| x.eq_ignore_ascii_case("nca"))
+            .unwrap_or(false)
+    })
+}
+
+pub fn ensure_eden_keys_for_launch(managed_root: &Path) -> Result<(), LaunchPrepError> {
+    let keys_dir = eden_keys_dir(managed_root);
+    fs::create_dir_all(&keys_dir).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+    if has_eden_prod_keys(&keys_dir) {
+        Ok(())
+    } else {
+        Err(LaunchPrepError::KeysMissing { keys_dir })
+    }
+}
+
+pub fn ensure_eden_firmware_for_launch(managed_root: &Path) -> Result<(), LaunchPrepError> {
+    let fw = eden_firmware_registered_dir(managed_root);
+    fs::create_dir_all(&fw).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+    if has_eden_firmware(&fw) {
+        Ok(())
+    } else {
+        Err(LaunchPrepError::FirmwareMissing { firmware_dir: fw })
+    }
+}
+
+/// Eden portable: `user/` junto al exe tiene prioridad sobre %AppData%.
+/// Sincroniza keys + firmware managed → `<exe_dir>/user/`.
+pub fn sync_eden_portable_user(
+    exe: &Path,
+    managed_root: &Path,
+) -> Result<PathBuf, LaunchPrepError> {
+    let exe_dir = exe
+        .parent()
+        .ok_or_else(|| LaunchPrepError::Io("Ruta de Eden inválida".into()))?;
+    let user_dir = exe_dir.join("user");
+    seed_eden_managed_layout(managed_root)?;
+    fs::create_dir_all(&user_dir).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+
+    let keys_src = eden_keys_dir(managed_root);
+    let keys_dst = user_dir.join("keys");
+    copy_directory_missing_only(&keys_src, &keys_dst)
+        .map_err(LaunchPrepError::Io)?;
+
+    let nand_src = managed_root.join("nand");
+    let nand_dst = user_dir.join("nand");
+    if nand_src.is_dir() {
+        copy_directory_missing_only(&nand_src, &nand_dst).map_err(LaunchPrepError::Io)?;
+    }
+    Ok(user_dir)
 }
 
 /// Réplica de `IsBIOS` → `LoadBiosVersion` en `pcsx2/ps2/BiosTools.cpp` (v2.8.2):
@@ -395,6 +516,23 @@ pub fn ensure_pcsx2_bios_for_launch(data_root: &Path) -> Result<(), LaunchPrepEr
     }
 }
 
+fn eden_launch_arguments(
+    managed: &Path,
+    content_path: &str,
+    start_fullscreen: bool,
+) -> Result<Vec<String>, LaunchPrepError> {
+    ensure_eden_keys_for_launch(managed)?;
+    ensure_eden_firmware_for_launch(managed)?;
+    // Flags Eden/yuzu: -f fullscreen, -g game path.
+    let mut args = Vec::new();
+    if start_fullscreen {
+        args.push("-f".to_string());
+    }
+    args.push("-g".to_string());
+    args.push(content_path.to_string());
+    Ok(args)
+}
+
 pub fn build_managed_launch_arguments(
     source: RuntimeDataSource,
     emulator_kind: &str,
@@ -403,6 +541,14 @@ pub fn build_managed_launch_arguments(
     content_path: &str,
     start_fullscreen: bool,
 ) -> Result<Vec<String>, LaunchPrepError> {
+    // Eden: keys/firmware viven en emulator-data/eden aunque el exe sea manual (Escritorio).
+    if emulator_kind == "eden" {
+        if let Some(managed) = paths.blaze_managed_root.as_ref() {
+            seed_eden_managed_layout(managed)?;
+            return eden_launch_arguments(managed, content_path, start_fullscreen);
+        }
+    }
+
     if source != RuntimeDataSource::Managed {
         let mut args = base_arguments.to_vec();
         args.push(content_path.to_string());
@@ -444,6 +590,13 @@ pub fn build_managed_launch_arguments(
             args.push(content_path.to_string());
             Ok(args)
         }
+        "eden" => {
+            let managed = paths
+                .blaze_managed_root
+                .as_ref()
+                .expect("managed eden root");
+            eden_launch_arguments(managed, content_path, start_fullscreen)
+        }
         _ => {
             let mut args = base_arguments.to_vec();
             args.push(content_path.to_string());
@@ -480,8 +633,46 @@ pub fn prepare_runtime_launch(
 
     let source = RuntimeDataSource::parse(runtime_source.as_deref());
     let app_data = app_data_dir(&app).ok();
-    let type_key = runtime_type.as_deref().unwrap_or(kind);
-    let paths = resolve_emulator_paths(app_data.as_deref(), source, type_key, &exe);
+    let type_key = if kind == "eden" {
+        "eden"
+    } else {
+        runtime_type.as_deref().unwrap_or(kind)
+    };
+    // Eden siempre usa keys/firmware managed de Blaze (aunque el runtime sea manual).
+    let paths = if type_key == "eden" {
+        if let Some(app) = app_data.as_deref() {
+            let managed = managed_data_root(app, "eden");
+            ResolvedEmulatorPaths {
+                blaze_managed_root: Some(managed),
+                pcsx2_data_root: None,
+                retroarch_cfg: None,
+            }
+        } else {
+            resolve_emulator_paths(None, source, type_key, &exe)
+        }
+    } else {
+        resolve_emulator_paths(app_data.as_deref(), source, type_key, &exe)
+    };
+
+    if type_key == "eden" {
+        if let Some(managed) = paths.blaze_managed_root.as_ref() {
+            if let Err(e) = sync_eden_portable_user(&exe, managed) {
+                return e.into_launch_plan();
+            }
+        }
+    }
+
+    // PCSX2 managed: sembrar BIOS del instalador antes de validar.
+    if source == RuntimeDataSource::Managed && type_key == "pcsx2" {
+        if let Some(internal) = paths.pcsx2_data_root.as_ref() {
+            let bios_dir = pcsx2_bios_directory(internal);
+            let _ = seed_bundled_directory_if_available(
+                &app,
+                &["resources/pcsx2/bios", "pcsx2/bios"],
+                &bios_dir,
+            );
+        }
+    }
 
     match build_managed_launch_arguments(
         source,
@@ -509,15 +700,9 @@ pub fn open_managed_pcsx2_bios_folder(app: AppHandle) -> Result<String, String> 
     fs::create_dir_all(&bios_dir).map_err(|e| e.to_string())?;
     // No siembra ini aquí: solo abre la carpeta para que el usuario deposite BIOS.
     #[cfg(windows)]
-    {
-        std::process::Command::new("explorer")
-            .arg(&bios_dir)
-            .spawn()
-            .map_err(|e| format!("No se pudo abrir la carpeta de BIOS: {e}"))?;
-    }
+    open_folder_windows(&bios_dir)?;
     #[cfg(not(windows))]
     {
-        let _ = bios_dir;
         return Err("Abrir carpeta de BIOS solo está implementado en Windows.".into());
     }
     Ok(bios_dir.to_string_lossy().to_string())
@@ -642,6 +827,9 @@ pub struct EmulatorSetupStatus {
     pub pcsx2_bios_dir: String,
     pub pcsx2_bios_found: bool,
     pub retroarch_system_dir: String,
+    pub eden_keys_dir: String,
+    pub eden_keys_found: bool,
+    pub eden_firmware_found: bool,
 }
 
 /// Crea y prepara los datos administrados de PCSX2 y RetroArch.
@@ -676,10 +864,8 @@ pub fn initialize_emulator_data(
         )
     })?;
 
-    // BIOS de PS2: NO se redistribuye con Blaze (copyright Sony).
-    // Solo se siembra si el desarrollador dejó dumps locales en resources/
-    // para builds privadas. Builds públicas no deben empaquetar esa carpeta.
-    // El usuario aporta su propio dump vía open_managed_pcsx2_bios_folder.
+    // BIOS PS2: embebida en el instalador (resources/pcsx2/bios vía vendor bios.7z).
+    // Se copia una vez a AppData; no sobrescribe dumps ya presentes.
     seed_bundled_directory_if_available(
         &app,
         &[
@@ -732,11 +918,250 @@ pub fn initialize_emulator_data(
     let bios_found =
         find_valid_pcsx2_bios(&bios_dir).is_some();
 
+    // ---------------------------------------------------------
+    // Eden (Nintendo Switch)
+    // ---------------------------------------------------------
+    let eden_root = managed_data_root(&app_data, "eden");
+    seed_eden_managed_layout(&eden_root).map_err(|e| {
+        format!("Error preparando Eden: {:?}", e)
+    })?;
+    let eden_keys = eden_keys_dir(&eden_root);
+    let eden_fw = eden_firmware_registered_dir(&eden_root);
+    // Keys/firmware Switch: NO en instalador público. Seed opcional solo builds privadas.
+    seed_bundled_directory_if_available(
+        &app,
+        &["resources/eden/keys", "eden/keys"],
+        &eden_keys,
+    )
+    .map_err(|e| format!("Error copiando keys Eden: {e}"))?;
+    seed_bundled_directory_if_available(
+        &app,
+        &[
+            "resources/eden/nand/system/Contents/registered",
+            "eden/nand/system/Contents/registered",
+        ],
+        &eden_fw,
+    )
+    .map_err(|e| format!("Error copiando firmware Eden: {e}"))?;
+
     Ok(EmulatorSetupStatus {
         pcsx2_bios_dir: bios_dir.to_string_lossy().into_owned(),
         pcsx2_bios_found: bios_found,
         retroarch_system_dir: system_dir.to_string_lossy().into_owned(),
+        eden_keys_dir: eden_keys.to_string_lossy().into_owned(),
+        eden_keys_found: has_eden_prod_keys(&eden_keys),
+        eden_firmware_found: has_eden_firmware(&eden_fw),
     })
+}
+
+fn open_folder_windows(dir: &Path) -> Result<(), String> {
+    // `explorer <path>` a veces tumba el proceso padre en Tauri/dev.
+    // `cmd /C start "" <path>` abre Explorer desacoplado.
+    let path = dir.to_string_lossy().to_string();
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &path])
+        .spawn()
+        .map_err(|e| format!("No se pudo abrir la carpeta: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_managed_eden_keys_folder(app: AppHandle) -> Result<String, String> {
+    let app_data = app_data_dir(&app)?;
+    let managed = managed_data_root(&app_data, "eden");
+    seed_eden_managed_layout(&managed).map_err(|e| format!("{e:?}"))?;
+    let keys_dir = eden_keys_dir(&managed);
+    fs::create_dir_all(&keys_dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    open_folder_windows(&keys_dir)?;
+    #[cfg(not(windows))]
+    {
+        return Err("Abrir carpeta de keys solo está implementado en Windows.".into());
+    }
+    Ok(keys_dir.to_string_lossy().to_string())
+}
+
+fn import_eden_firmware_zip_sync(managed: &Path, zip_path: &Path) -> Result<String, String> {
+    seed_eden_managed_layout(managed).map_err(|e| format!("{e:?}"))?;
+    let dest = eden_firmware_registered_dir(managed);
+    if !zip_path.is_file() {
+        return Err("El archivo zip de firmware no existe.".into());
+    }
+
+    let file = File::open(zip_path).map_err(|e| e.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut imported = 0usize;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let Some(name) = entry.enclosed_name() else {
+            continue;
+        };
+        let file_name = name
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        if !file_name.to_ascii_lowercase().ends_with(".nca") {
+            continue;
+        }
+        let out_path = dest.join(&file_name);
+        if out_path.exists() {
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut out = File::create(&out_path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+        imported += 1;
+    }
+    if imported == 0 && !has_eden_firmware(&dest) {
+        return Err(
+            "No se encontraron archivos .nca en el zip (¿firmware Switch válido?).".into(),
+        );
+    }
+    Ok(format!(
+        "Firmware OK ({imported} archivos) en {}",
+        dest.display()
+    ))
+}
+
+/// Extrae un zip de firmware Switch (`.nca`) a la NAND managed (fuera del hilo UI).
+#[tauri::command]
+pub async fn import_eden_firmware_zip(
+    app: AppHandle,
+    zip_path: String,
+) -> Result<String, String> {
+    let app_data = app_data_dir(&app)?;
+    let managed = managed_data_root(&app_data, "eden");
+    let zip_file = PathBuf::from(zip_path);
+    tokio::task::spawn_blocking(move || import_eden_firmware_zip_sync(&managed, &zip_file))
+        .await
+        .map_err(|e| format!("Importación cancelada: {e}"))?
+}
+
+fn try_eden_install_one(eden_exe: &Path, nsp: &Path) -> Result<(), String> {
+    let nsp_s = nsp.to_string_lossy().to_string();
+    let cli = eden_exe
+        .parent()
+        .map(|d| d.join("eden-cli.exe"))
+        .filter(|p| p.is_file());
+
+    let mut attempts: Vec<(PathBuf, Vec<String>)> = Vec::new();
+    // Flags comunes en forks yuzu/Eden (si el build no los tiene, fallan y seguimos).
+    attempts.push((
+        eden_exe.to_path_buf(),
+        vec!["--install".into(), nsp_s.clone()],
+    ));
+    attempts.push((eden_exe.to_path_buf(), vec!["-i".into(), nsp_s.clone()]));
+    if let Some(cli) = cli {
+        attempts.push((cli.clone(), vec!["--install".into(), nsp_s.clone()]));
+        attempts.push((cli, vec!["-i".into(), nsp_s]));
+    }
+
+    let mut last_err = String::from("sin intento");
+    for (exe, args) in attempts {
+        match std::process::Command::new(&exe).args(&args).status() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => {
+                last_err = format!("{} {:?} → exit {status}", exe.display(), args);
+            }
+            Err(e) => {
+                last_err = format!("{} {:?} → {e}", exe.display(), args);
+            }
+        }
+    }
+    Err(last_err)
+}
+
+/// Instala update/DLC (.nsp) en Eden (keys managed + portable sync). Best-effort por CLI.
+#[tauri::command]
+pub async fn install_eden_title_nsps(
+    app: AppHandle,
+    eden_executable: String,
+    nsp_paths: Vec<String>,
+) -> Result<String, String> {
+    let app_data = app_data_dir(&app)?;
+    let managed = managed_data_root(&app_data, "eden");
+    let exe = PathBuf::from(eden_executable);
+    if !exe.is_file() {
+        return Err("No se encontró eden.exe para instalar update/DLC.".into());
+    }
+    if nsp_paths.is_empty() {
+        return Ok("Sin update/DLC para instalar.".into());
+    }
+
+    tokio::task::spawn_blocking(move || {
+        seed_eden_managed_layout(&managed).map_err(|e| format!("{e:?}"))?;
+        ensure_eden_keys_for_launch(&managed).map_err(|e| format!("{e:?}"))?;
+        ensure_eden_firmware_for_launch(&managed).map_err(|e| format!("{e:?}"))?;
+        sync_eden_portable_user(&exe, &managed).map_err(|e| format!("{e:?}"))?;
+
+        let pending_dir = managed.join("pending-nsp");
+        fs::create_dir_all(&pending_dir).map_err(|e| e.to_string())?;
+
+        let mut ok = 0usize;
+        let mut fail = 0usize;
+        let mut notes: Vec<String> = Vec::new();
+
+        for raw in &nsp_paths {
+            let src = PathBuf::from(raw);
+            if !src.is_file() {
+                fail += 1;
+                notes.push(format!("faltante: {raw}"));
+                continue;
+            }
+            let name = src
+                .file_name()
+                .map(|n| n.to_os_string())
+                .unwrap_or_default();
+            let staged = pending_dir.join(&name);
+            if !staged.exists() {
+                fs::copy(&src, &staged).map_err(|e| {
+                    format!("No se pudo copiar {} a pending: {e}", src.display())
+                })?;
+            }
+            let marker = pending_dir.join(format!(
+                ".installed-{}",
+                name.to_string_lossy().replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|'], "_")
+            ));
+            if marker.is_file() {
+                ok += 1;
+                continue;
+            }
+            match try_eden_install_one(&exe, &staged) {
+                Ok(()) => {
+                    let _ = fs::write(&marker, b"ok");
+                    ok += 1;
+                }
+                Err(e) => {
+                    fail += 1;
+                    notes.push(format!("{}: {e}", name.to_string_lossy()));
+                }
+            }
+        }
+
+        if ok == 0 && fail > 0 {
+            return Err(format!(
+                "Eden no aceptó instalar los NSP por CLI ({}). Quedaron en {} — abrí Eden → Archivo → Instalar archivos.",
+                notes.join(" | "),
+                pending_dir.display()
+            ));
+        }
+        if fail > 0 {
+            return Ok(format!(
+                "Instalados {ok}; {fail} pendientes en {} (Eden → Archivo → Instalar archivos). {}",
+                pending_dir.display(),
+                notes.join(" | ")
+            ));
+        }
+        Ok(format!("Update/DLC instalados en Eden ({ok})."))
+    })
+    .await
+    .map_err(|e| format!("Instalación cancelada: {e}"))?
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -984,6 +1409,41 @@ mod tests {
             managed_data_root(&app, "pcsx2"),
             app.join("emulator-data").join("pcsx2")
         );
+        assert_eq!(
+            managed_data_root(&app, "eden"),
+            app.join("emulator-data").join("eden")
+        );
+    }
+
+    #[test]
+    fn eden_keys_and_firmware_gates() {
+        let root = temp("eden-gates");
+        seed_eden_managed_layout(&root).unwrap();
+        assert!(ensure_eden_keys_for_launch(&root).is_err());
+        assert!(ensure_eden_firmware_for_launch(&root).is_err());
+
+        let keys = eden_keys_dir(&root);
+        fs::write(keys.join("prod.keys"), vec![b'A'; 64]).unwrap();
+        assert!(ensure_eden_keys_for_launch(&root).is_ok());
+
+        let fw = eden_firmware_registered_dir(&root);
+        fs::write(fw.join("dummy.nca"), b"nca").unwrap();
+        assert!(ensure_eden_firmware_for_launch(&root).is_ok());
+
+        let args = build_managed_launch_arguments(
+            RuntimeDataSource::Managed,
+            "eden",
+            &ResolvedEmulatorPaths {
+                blaze_managed_root: Some(root.clone()),
+                pcsx2_data_root: None,
+                retroarch_cfg: None,
+            },
+            &[],
+            r"C:\games\mk8.nsp",
+            true,
+        )
+        .unwrap();
+        assert_eq!(args, vec!["-f".to_string(), "-g".to_string(), r"C:\games\mk8.nsp".to_string()]);
     }
 
     #[test]
@@ -1129,6 +1589,30 @@ mod tests {
         assert!(ini.contains("[Achievements]"));
         assert!(ini.contains("Username=PlayerOne"));
         assert!(ini.contains("Enabled=true"));
+    }
+
+    #[test]
+    fn sync_eden_portable_copies_keys() {
+        let managed = temp("eden-sync-managed");
+        let runtime = temp("eden-sync-runtime");
+        seed_eden_managed_layout(&managed).unwrap();
+        fs::write(eden_keys_dir(&managed).join("prod.keys"), vec![b'P'; 40]).unwrap();
+        fs::write(
+            eden_firmware_registered_dir(&managed).join("sys.nca"),
+            b"nca",
+        )
+        .unwrap();
+        let exe = runtime.join("eden.exe");
+        fs::write(&exe, b"x").unwrap();
+        let user = sync_eden_portable_user(&exe, &managed).unwrap();
+        assert!(user.join("keys").join("prod.keys").is_file());
+        assert!(user
+            .join("nand")
+            .join("system")
+            .join("Contents")
+            .join("registered")
+            .join("sys.nca")
+            .is_file());
     }
 
 }

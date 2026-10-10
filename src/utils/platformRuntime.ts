@@ -6,9 +6,11 @@ import {
   type RaRuntimeKind,
 } from "./raConsoles";
 import {
+  isEdenRuntime,
   isPcsx2Runtime,
   isRetroArchRuntime,
   resolveRaAdapterKind,
+  resolveRuntimeKind,
 } from "../services/ra/adapterKind";
 import {
   hasRetroArchCoreFlag,
@@ -28,6 +30,7 @@ export function runtimeKindForPlatform(
   const key = platformToRaConsoleKey(platform);
   if (!key) return null;
   if (key === "ps2") return "pcsx2";
+  if (key === "switch") return "eden";
   return "retroarch";
 }
 
@@ -46,6 +49,7 @@ export function findRuntimeForPlatform(
 
   const matches = runtimes.filter((r) => {
     if (kind === "pcsx2") return isPcsx2Runtime(r);
+    if (kind === "eden") return isEdenRuntime(r);
     return isRetroArchRuntime(r);
   });
   // Preferir managed (cores en <exe>/cores/) si hay varios.
@@ -64,13 +68,20 @@ export function runtimeMissingMessage(
   if (kind === "retroarch") {
     return "Blaze necesita RetroArch. Agregalo en Runtimes (una sola vez) y volvé a descargar.";
   }
+  if (kind === "eden") {
+    return "Blaze necesita Eden (Switch). Se instala solo la primera vez o agregalo en Runtimes.";
+  }
   return "No se pudo determinar el emulador para esta plataforma.";
 }
 
 export function describeRuntimeChoice(runtime: Runtime): string {
-  const kind = resolveRaAdapterKind(runtime);
+  const kind = resolveRuntimeKind(runtime);
   if (kind === "pcsx2") return "PCSX2";
   if (kind === "retroarch") return "RetroArch";
+  if (kind === "eden") return "Eden";
+  const ra = resolveRaAdapterKind(runtime);
+  if (ra === "pcsx2") return "PCSX2";
+  if (ra === "retroarch") return "RetroArch";
   return runtime.name;
 }
 

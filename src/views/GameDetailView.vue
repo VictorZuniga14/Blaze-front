@@ -27,7 +27,10 @@ import { useAuthStore } from "../stores/auth";
 import { catalogPublishService } from "../services/catalogPublish.service";
 import { catalogApiService } from "../services/catalogApi.service";
 import { catalogInstallService } from "../services/catalogInstall.service";
-import { formatBytes } from "../services/catalogTransfer.service";
+import {
+  formatBytes,
+  listSwitchExtras,
+} from "../services/catalogTransfer.service";
 import type { R2OrphanObject } from "../types/catalog";
 
 const route = useRoute();
@@ -93,6 +96,8 @@ const canPublishToCatalog = computed(
 const alreadyInCatalog = computed(() => !!game.value?.catalogRemoteId);
 const catalogRemoving = ref(false);
 const catalogUnpublishOpen = ref(false);
+/** Update/DLC .nsp/.xci junto a la base Switch (se empaquetan al publicar). */
+const switchExtrasCount = ref(0);
 const r2LinkOpen = ref(false);
 const r2LinkLoading = ref(false);
 const r2LinkSaving = ref(false);
@@ -410,6 +415,26 @@ async function useAsLaunchContent() {
   }
 }
 
+async function refreshSwitchExtrasHint() {
+  switchExtrasCount.value = 0;
+  const path = content.value?.path?.trim();
+  if (!path || !/\.(nsp|xci)$/i.test(path)) return;
+  try {
+    const extras = await listSwitchExtras(path);
+    switchExtrasCount.value = extras.length;
+  } catch {
+    switchExtrasCount.value = 0;
+  }
+}
+
+watch(
+  () => content.value?.path,
+  () => {
+    void refreshSwitchExtrasHint();
+  },
+  { immediate: true },
+);
+
 async function publishToCatalog() {
   if (!gameId.value || catalogPublishing.value) return;
   catalogError.value = null;
@@ -432,10 +457,15 @@ async function publishToCatalog() {
       : "Publicado en el catálogo. Tus amigos ya pueden descargarlo.";
     catalogProgress.value = null;
   } catch (err) {
-    catalogError.value =
+    const raw =
       err instanceof Error
         ? err.message
-        : "No se pudo publicar en el catálogo.";
+        : typeof err === "string"
+          ? err
+          : null;
+    catalogError.value = raw?.trim()
+      ? raw
+      : "No se pudo publicar en el catálogo.";
     catalogProgress.value = null;
   } finally {
     catalogPublishing.value = false;
@@ -819,6 +849,13 @@ async function confirmDelete() {
                         : "Publicar en catálogo"
                   }}
                 </button>
+                <p
+                  v-if="switchExtrasCount > 0"
+                  class="side-note"
+                >
+                  Al publicar se incluirán {{ switchExtrasCount }} update/DLC
+                  de la misma carpeta.
+                </p>
                 <button
                   type="button"
                   class="side-link"

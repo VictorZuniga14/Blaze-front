@@ -176,9 +176,6 @@ onMounted(() => {
               @error="onCoverError(game.id)"
             />
             <span v-else class="catalog-card__title">{{ game.title }}</span>
-            <span v-if="game.platform" class="catalog-card__platform">
-              {{ game.platform }}
-            </span>
             <span
               v-if="isInLibrary(game.id)"
               class="catalog-card__badge"
@@ -189,7 +186,6 @@ onMounted(() => {
           <div class="catalog-card__meta">
             <p class="catalog-card__name">{{ game.title }}</p>
             <p class="catalog-card__by">
-              {{ game.publisherUsername }} ·
               {{ formatBytes(Number(game.fileSizeBytes)) }}
             </p>
           </div>
@@ -426,25 +422,6 @@ onMounted(() => {
   line-height: 1.3;
   text-align: center;
   text-wrap: balance;
-}
-
-.catalog-card__platform {
-  position: absolute;
-  left: 6px;
-  top: 6px;
-  max-width: calc(100% - 12px);
-  overflow: hidden;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #66c0f4;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.2;
-  padding: 3px 5px;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .catalog-card__badge {

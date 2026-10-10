@@ -70,7 +70,7 @@ onMounted(() => {
     phase.value = auth.isAuthenticated ? "signingIn" : "loading";
     try {
       await ensureDefaultRuntimes();
-      console.info("[Blaze] Runtimes listos (PCSX2 + RetroArch)");
+      console.info("[Blaze] Runtimes listos (PCSX2 + RetroArch + Eden)");
     } catch (error) {
       console.error("[Blaze] Error preparando runtimes:", error);
     }
