@@ -50,6 +50,13 @@ export const useAuthStore = defineStore("auth", () => {
       } catch (applyErr) {
         console.error("[Blaze] No se pudo aplicar RA a emuladores:", applyErr);
       }
+      // Sync fichas cloud (tipo Steam) tras login.
+      try {
+        const { useLibraryStore } = await import("./library");
+        await useLibraryStore().loadLibrary();
+      } catch (syncErr) {
+        console.warn("[Blaze] Sync biblioteca cloud tras login:", syncErr);
+      }
     } catch (err) {
       const message = userFacingError(err, "No se pudo iniciar sesión.");
       error.value = message;

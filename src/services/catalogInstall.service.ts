@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { catalogApiService } from "./catalogApi.service";
+import { libraryApiService } from "./libraryApi.service";
 import {
   catalogGamesDir,
   downloadFile,
@@ -127,16 +128,47 @@ async function downloadCatalogPayload(
  * Catálogo → biblioteca (solo ficha). La descarga del ROM es otro paso.
  */
 export const catalogInstallService = {
-  async addToLibrary(catalogGameId: string): Promise<{
+  /**
+   * Crea la ficha local si no existe. `syncCloud` (default true) hace push a /api/library.
+   * El sync pull usa syncCloud: false (ya está en el servidor).
+   */
+  async addToLibrary(
+    catalogGameId: string,
+    options?: { syncCloud?: boolean; allowExisting?: boolean },
+  ): Promise<{
     game: Game;
     catalog: CatalogGame;
   }> {
+    const syncCloud = options?.syncCloud !== false;
+    const allowExisting = options?.allowExisting === true;
+
     const catalog = await catalogApiService.get(catalogGameId);
     const existing = await gameRepository.findByCatalogRemoteId(catalog.id);
     if (existing) {
+      if (allowExisting) {
+        if (syncCloud) {
+          const pushed = await libraryApiService.add(catalog.id);
+          if (!pushed) {
+            throw new Error(
+              "Tenés que iniciar sesión para sincronizar la biblioteca.",
+            );
+          }
+        }
+        return { game: existing, catalog };
+      }
       throw new Error(
         "Este juego ya está en tu biblioteca. Abrilo desde Biblioteca.",
       );
+    }
+
+    // Push cloud antes de crear local para no perder la ficha en el próximo sync SoT.
+    if (syncCloud) {
+      const pushed = await libraryApiService.add(catalog.id);
+      if (!pushed) {
+        throw new Error(
+          "Tenés que iniciar sesión para sincronizar la biblioteca.",
+        );
+      }
     }
 
     const game = await gameService.createGame({

@@ -4,12 +4,14 @@ import { RouterView, useRoute } from "vue-router";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "./stores/auth";
 import { useRaSessionSyncStore } from "./stores/raSessionSync";
+import { useCatalogDownloadStore } from "./stores/catalogDownload";
 import { initializeBlazeEmulators } from "./services/emulatorData.service";
 import { ensureDefaultRuntimes } from "./services/ensureRuntime.service";
 import { checkAndPromptAppUpdate } from "./services/appUpdater.service";
 import BlazeLoader from "./components/BlazeLoader.vue";
 import AppNav from "./components/AppNav.vue";
 import WindowChrome from "./components/WindowChrome.vue";
+import DownloadProgressHud from "./components/DownloadProgressHud.vue";
 
 type BootPhase = "checking" | "signingIn" | "loading" | "ready";
 
@@ -18,10 +20,33 @@ const LOADING_MS = 5000;
 
 const auth = useAuthStore();
 const raSync = useRaSessionSyncStore();
+const catalogDownloads = useCatalogDownloadStore();
 const route = useRoute();
 const { user } = storeToRefs(auth);
+const { hudJob, hasActiveDownloads } = storeToRefs(catalogDownloads);
 
 const showNav = computed(() => route.name !== "login");
+
+const globalHudTitle = computed(() => {
+  const job = hudJob.value;
+  if (!job) return "DESCARGANDO";
+  if (job.gameTitle) return `${job.hudTitle} · ${job.gameTitle}`;
+  return job.hudTitle;
+});
+
+/** Evita duplicar el HUD si ya se muestra en el detalle del mismo juego. */
+const showGlobalDownloadHud = computed(() => {
+  if (!hasActiveDownloads.value || !hudJob.value) return false;
+  const jobId = hudJob.value.gameId;
+  if (
+    typeof route.params.id === "string" &&
+    route.params.id === jobId &&
+    String(route.path).startsWith("/games/")
+  ) {
+    return false;
+  }
+  return true;
+});
 
 const phase = ref<BootPhase>("checking");
 
@@ -119,6 +144,17 @@ onBeforeUnmount(() => {
     <div class="app-shell__main">
       <RouterView />
     </div>
+    <div
+      v-if="showGlobalDownloadHud && hudJob"
+      class="global-dl-hud"
+      aria-live="polite"
+    >
+      <DownloadProgressHud
+        :title="globalHudTitle"
+        :percent="hudJob.percent"
+        :detail="hudJob.detail"
+      />
+    </div>
   </div>
 </template>
 
@@ -152,5 +188,20 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.global-dl-hud {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 36px));
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(23, 26, 33, 0.94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
 }
 </style>

@@ -12,6 +12,7 @@ import PlaytimeClockIcon from "../components/icons/PlaytimeClockIcon.vue";
 import RaAchievementsShowcase from "../components/RaAchievementsShowcase.vue";
 import RaProgressPanel from "../components/RaProgressPanel.vue";
 import { useLibraryStore } from "../stores/library";
+import { useCatalogDownloadStore } from "../stores/catalogDownload";
 import { useLaunchStore } from "../stores/launch";
 import { usePlayHistoryStore } from "../stores/playHistory";
 import { useRaProgressStore } from "../stores/raProgress";
@@ -36,6 +37,7 @@ import type { R2OrphanObject } from "../types/catalog";
 const route = useRoute();
 const router = useRouter();
 const library = useLibraryStore();
+const catalogDownloads = useCatalogDownloadStore();
 const catalogCovers = useCatalogCoversStore();
 const launch = useLaunchStore();
 const raProgress = useRaProgressStore();
@@ -105,10 +107,15 @@ const r2ContentOptions = ref<R2OrphanObject[]>([]);
 const r2SelectedKey = ref<string | null>(null);
 const r2SuggestCover = ref<((key: string) => string | null) | null>(null);
 const needsCloudRepair = ref(false);
-const repairingFromCloud = ref(false);
-const cloudRepairTitle = ref("DESCARGANDO");
-const cloudRepairPercent = ref(0);
-const cloudRepairDetail = ref<string | null>(null);
+const downloadJob = computed(() => catalogDownloads.jobFor(gameId.value));
+const repairingFromCloud = computed(() =>
+  catalogDownloads.isActive(gameId.value),
+);
+const cloudRepairTitle = computed(
+  () => downloadJob.value?.hudTitle ?? "DESCARGANDO",
+);
+const cloudRepairPercent = computed(() => downloadJob.value?.percent ?? 0);
+const cloudRepairDetail = computed(() => downloadJob.value?.detail ?? null);
 
 const coverSrc = computed(() =>
   game.value ? catalogCovers.coverForGame(game.value) : null,
@@ -193,9 +200,6 @@ async function ensureLoaded() {
   pageError.value = null;
   contentInfo.value = null;
   needsCloudRepair.value = false;
-  cloudRepairTitle.value = "DESCARGANDO";
-  cloudRepairPercent.value = 0;
-  cloudRepairDetail.value = null;
   if (!library.ready) {
     await library.loadLibrary();
   }
@@ -250,59 +254,31 @@ async function ensureLoaded() {
   }
 }
 
-async function restoreFromCatalog() {
+function restoreFromCatalog() {
   if (!gameId.value || repairingFromCloud.value) return;
   pageError.value = null;
   contentInfo.value = null;
-  repairingFromCloud.value = true;
-  cloudRepairTitle.value = "PREPARANDO";
-  cloudRepairPercent.value = 0;
-  cloudRepairDetail.value = null;
-  try {
-    const result = await catalogInstallService.repairFromCatalog(
-      gameId.value,
-      (p) => {
-        if (p.phase === "downloading") {
-          cloudRepairTitle.value = "DESCARGANDO";
-        } else if (p.phase === "installing") {
-          cloudRepairTitle.value = "INSTALANDO";
-        } else {
-          cloudRepairTitle.value = "PREPARANDO";
-        }
-        if (p.bytesTotal > 0) {
-          cloudRepairPercent.value = Math.min(
-            100,
-            Math.round((p.bytesDone / p.bytesTotal) * 100),
-          );
-          cloudRepairDetail.value = `${formatBytes(p.bytesDone)} / ${formatBytes(p.bytesTotal)}`;
-        } else if (p.phase === "installing") {
-          cloudRepairPercent.value = 100;
-          cloudRepairDetail.value = p.message;
-        }
-      },
-    );
-    await library.loadLibrary();
+  catalogDownloads.startDownload(gameId.value, {
+    gameTitle: game.value?.title ?? null,
+  });
+}
+
+async function onDownloadJobSettled(
+  status: string | undefined,
+  prev: string | undefined,
+) {
+  if (!gameId.value) return;
+  if (status === "done" && prev && prev !== "done") {
     await Promise.all([
       launch.loadConfig(gameId.value),
       gameContent.loadContent(gameId.value),
     ]);
     needsCloudRepair.value = false;
-    contentInfo.value = `Descargado desde el catálogo · runtime ${result.runtimeName}`;
-  } catch (err) {
-    const raw =
-      err instanceof Error
-        ? err.message
-        : typeof err === "string"
-          ? err
-          : null;
-    pageError.value = raw?.trim()
-      ? raw
-      : "No se pudo restaurar desde el catálogo.";
-  } finally {
-    repairingFromCloud.value = false;
-    cloudRepairTitle.value = "DESCARGANDO";
-    cloudRepairPercent.value = 0;
-    cloudRepairDetail.value = null;
+    contentInfo.value = "Descargado desde el catálogo.";
+    catalogDownloads.clearJob(gameId.value);
+  } else if (status === "error" && prev && prev !== "error") {
+    pageError.value =
+      downloadJob.value?.error ?? "No se pudo restaurar desde el catálogo.";
   }
 }
 
@@ -313,6 +289,13 @@ onMounted(() => {
 watch(gameId, () => {
   void ensureLoaded();
 });
+
+watch(
+  () => downloadJob.value?.status,
+  (status, prev) => {
+    void onDownloadJobSettled(status, prev);
+  },
+);
 
 function goEdit() {
   if (gameId.value) {

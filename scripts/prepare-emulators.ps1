@@ -6,7 +6,7 @@
 param(
   [string]$Pcsx2Path = "C:\Users\viczo\OneDrive\Escritorio\pcsx2-v2.8.2-windows-x64-Qt",
   [string]$RetroArchPath = "C:\RetroArch-Win64",
-  [string]$EdenPath = "C:\Users\viczo\OneDrive\Escritorio\Eden",
+  [string]$EdenPath = "C:\Users\viczo\OneDrive\Escritorio\Eden-Windows-v0.2.1-amd64-msvc-standard",
   # Dump(s) PS2 para el instalador (Release vendor → bios.7z). Por defecto: carpeta bios de PCSX2.
   [string]$BiosPath = "",
   # Keys + firmware Switch (Release vendor → eden-keys.7z / eden-firmware.7z).
@@ -95,22 +95,26 @@ if (Test-Path $raPack) { Remove-Item $raPack -Force }
 if ($LASTEXITCODE -ne 0) { throw "7z retroarch falló: $LASTEXITCODE" }
 
 if (Test-Path (Join-Path $EdenPath "eden.exe")) {
-  Write-Host "Creando eden.7z..."
+  # Pack completo (MSVC estático o MinGW+Qt). Nunca listar solo Qt6*.dll sin platforms/.
+  Write-Host "Creando eden.7z (carpeta completa)..."
+  $stagingEden = Join-Path $root "src-tauri\resources\emulators\eden"
+  if (Test-Path $stagingEden) { Remove-Item $stagingEden -Recurse -Force }
+  New-Item -ItemType Directory -Force -Path $stagingEden | Out-Null
+  robocopy $EdenPath $stagingEden /E /XD user /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "robocopy Eden falló: $LASTEXITCODE" }
+
   $edenPack = Join-Path $packs "eden.7z"
   if (Test-Path $edenPack) { Remove-Item $edenPack -Force }
-  $edenFiles = @(
-    "eden.exe", "eden-cli.exe", "eden-room.exe",
-    "Qt6Core.dll", "Qt6Gui.dll", "Qt6Network.dll", "Qt6Svg.dll", "Qt6Widgets.dll",
-    "LICENSE.txt", "README.md"
-  ) | ForEach-Object { Join-Path $EdenPath $_ } | Where-Object { Test-Path $_ }
-  & $SevenZip a -t7z -mx=5 -mmt=on $edenPack @edenFiles | Out-Null
+  & $SevenZip a -t7z -mx=5 -mmt=on $edenPack "$stagingEden\*" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "7z eden falló: $LASTEXITCODE" }
   $hash = (Get-FileHash $edenPack -Algorithm SHA256).Hash.ToLowerInvariant()
   $entry = $manifest.runtimes | Where-Object { $_.id -eq "eden" }
   $ver = if ($entry) { $entry.version } else { "0.1.0" }
   $meta = @{ version = $ver; sha256 = $hash } | ConvertTo-Json
+  Set-Content -Encoding utf8 (Join-Path $stagingEden ".blaze-bundle.json") -Value $meta
   Set-Content -Encoding utf8 (Join-Path $packs "eden.blaze-bundle.json") -Value $meta
-  Write-Host "Actualizá sha256 de eden en runtimes.manifest.json si cambió: $hash"
+  Write-Host "eden.7z listo. sha256 (bundle offline): $hash"
+  Write-Host "Subí packs/eden.7z al Release vendor (el workflow regenera el json)."
 } else {
   Write-Host "Omitiendo Eden (no hay eden.exe en $EdenPath)"
 }

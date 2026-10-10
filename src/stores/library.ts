@@ -2,7 +2,10 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { gameService } from "../services/game.service";
 import { catalogApiService } from "../services/catalogApi.service";
+import { catalogInstallService } from "../services/catalogInstall.service";
+import { libraryApiService } from "../services/libraryApi.service";
 import { localDbService } from "../services/localDb.service";
+import { sessionStorage } from "../services/sessionStorage.service";
 import { usePlayHistoryStore } from "./playHistory";
 import { useCatalogCoversStore } from "./catalogCovers";
 import type { Game, GameSort, GameWritableFields } from "../types/game";
@@ -64,6 +67,53 @@ export const useLibraryStore = defineStore("library", () => {
     return list;
   });
 
+  /**
+   * Pull de biblioteca cloud (fuente de verdad para fichas de catálogo).
+   * Crea locales faltantes sin ROM; elimina locales con catalogRemoteId que ya no están en el servidor.
+   */
+  async function syncCloudLibrary(): Promise<void> {
+    const token = await sessionStorage.getToken();
+    if (!token) return;
+
+    let remote;
+    try {
+      remote = await libraryApiService.list();
+    } catch (err) {
+      console.warn("[library] Sync cloud falló:", err);
+      return;
+    }
+
+    const remoteIds = new Set(remote.map((e) => e.catalogGameId));
+
+    for (const entry of remote) {
+      try {
+        await catalogInstallService.addToLibrary(entry.catalogGameId, {
+          syncCloud: false,
+          allowExisting: true,
+        });
+      } catch (err) {
+        console.warn(
+          "[library] No se pudo materializar ficha",
+          entry.catalogGameId,
+          err,
+        );
+      }
+    }
+
+    const locals = await gameService.listGames();
+    for (const game of locals) {
+      const remoteId = game.catalogRemoteId?.trim();
+      if (!remoteId) continue;
+      if (remoteIds.has(remoteId)) continue;
+      try {
+        await usePlayHistoryStore().deleteGameHistory(game.id);
+        await gameService.deleteGame(game.id);
+      } catch (err) {
+        console.warn("[library] No se pudo quitar ficha local huérfana:", err);
+      }
+    }
+  }
+
   async function loadLibrary(): Promise<void> {
     loading.value = true;
     error.value = null;
@@ -72,6 +122,7 @@ export const useLibraryStore = defineStore("library", () => {
         await localDbService.init();
         ready.value = true;
       }
+      await syncCloudLibrary();
       games.value = await gameService.listGames();
     } catch (err) {
       error.value = userFacingError(
@@ -114,6 +165,12 @@ export const useLibraryStore = defineStore("library", () => {
   async function deleteGame(id: string): Promise<void> {
     error.value = null;
     try {
+      const current =
+        games.value.find((game) => game.id === id) ??
+        (await gameService.getGame(id));
+      if (current?.catalogRemoteId?.trim()) {
+        await libraryApiService.remove(current.catalogRemoteId);
+      }
       await usePlayHistoryStore().deleteGameHistory(id);
       await gameService.deleteGame(id);
       games.value = games.value.filter((game) => game.id !== id);

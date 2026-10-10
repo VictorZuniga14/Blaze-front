@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "../stores/auth";
 import { useLibraryStore } from "../stores/library";
+import { useCatalogDownloadStore } from "../stores/catalogDownload";
 import { catalogApiService } from "../services/catalogApi.service";
 import { catalogInstallService } from "../services/catalogInstall.service";
 import { formatBytes } from "../services/catalogTransfer.service";
@@ -19,15 +20,13 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const library = useLibraryStore();
+const catalogDownloads = useCatalogDownloadStore();
 const { isAuthenticated } = storeToRefs(auth);
 
 const game = ref<CatalogGame | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const busy = ref(false);
-const downloadTitle = ref("DESCARGANDO");
-const downloadPercent = ref(0);
-const downloadDetail = ref<string | null>(null);
+const adding = ref(false);
 const catalogId = computed(() =>
   typeof route.params.id === "string" ? route.params.id : "",
 );
@@ -40,6 +39,20 @@ const localGame = computed(() => {
 });
 
 const inLibrary = computed(() => !!localGame.value);
+
+const downloadJob = computed(() =>
+  localGame.value ? catalogDownloads.jobFor(localGame.value.id) : null,
+);
+const downloading = computed(() =>
+  localGame.value ? catalogDownloads.isActive(localGame.value.id) : false,
+);
+const busy = computed(() => adding.value || downloading.value);
+
+const downloadTitle = computed(
+  () => downloadJob.value?.hudTitle ?? "DESCARGANDO",
+);
+const downloadPercent = computed(() => downloadJob.value?.percent ?? 0);
+const downloadDetail = computed(() => downloadJob.value?.detail ?? null);
 
 const tags = computed(() =>
   gameTagLabels({
@@ -77,44 +90,18 @@ async function load(): Promise<void> {
 
 async function primaryAction(): Promise<void> {
   if (!game.value || busy.value) return;
-  busy.value = true;
   error.value = null;
-  downloadTitle.value = inLibrary.value ? "PREPARANDO" : "AGREGANDO";
-  downloadPercent.value = 0;
-  downloadDetail.value = null;
   try {
     if (!inLibrary.value) {
-      downloadTitle.value = "AGREGANDO";
+      adding.value = true;
       const result = await catalogInstallService.addToLibrary(game.value.id);
       await library.loadLibrary();
       await router.push(`/games/${result.game.id}`);
       return;
     }
-    downloadTitle.value = "DESCARGANDO";
-    await catalogInstallService.repairFromCatalog(
-      localGame.value!.id,
-      (p) => {
-        if (p.phase === "downloading") {
-          downloadTitle.value = "DESCARGANDO";
-        } else if (p.phase === "installing") {
-          downloadTitle.value = "INSTALANDO";
-        } else {
-          downloadTitle.value = "PREPARANDO";
-        }
-        if (p.bytesTotal > 0) {
-          downloadPercent.value = Math.min(
-            100,
-            Math.round((p.bytesDone / p.bytesTotal) * 100),
-          );
-          downloadDetail.value = `${formatBytes(p.bytesDone)} / ${formatBytes(p.bytesTotal)}`;
-        } else if (p.phase === "installing") {
-          downloadPercent.value = 100;
-          downloadDetail.value = p.message;
-        }
-      },
-    );
-    await library.loadLibrary();
-    await router.push(`/games/${localGame.value!.id}`);
+    catalogDownloads.startDownload(localGame.value!.id, {
+      gameTitle: game.value.title,
+    });
   } catch (err) {
     error.value = userFacing(
       err,
@@ -123,10 +110,7 @@ async function primaryAction(): Promise<void> {
         : "No se pudo agregar a la biblioteca.",
     );
   } finally {
-    busy.value = false;
-    downloadTitle.value = "DESCARGANDO";
-    downloadPercent.value = 0;
-    downloadDetail.value = null;
+    adding.value = false;
   }
 }
 
@@ -137,6 +121,20 @@ onMounted(() => {
 watch(catalogId, () => {
   void load();
 });
+
+watch(
+  () => downloadJob.value?.status,
+  (status, prev) => {
+    if (status === "done" && prev && prev !== "done" && localGame.value) {
+      const id = localGame.value.id;
+      catalogDownloads.clearJob(id);
+      void router.push(`/games/${id}`);
+    } else if (status === "error" && prev && prev !== "error") {
+      error.value =
+        downloadJob.value?.error ?? "No se pudo descargar el juego.";
+    }
+  },
+);
 </script>
 
 <template>
@@ -167,7 +165,7 @@ watch(catalogId, () => {
 
       <section class="action-bar">
         <DownloadProgressHud
-          v-if="busy && inLibrary"
+          v-if="downloading"
           :title="downloadTitle"
           :percent="downloadPercent"
           :detail="downloadDetail"
@@ -188,7 +186,7 @@ watch(catalogId, () => {
             class="btn-primary__icon"
           />
           {{
-            busy
+            adding
               ? "Agregando…"
               : inLibrary
                 ? "Descargar"
@@ -196,7 +194,7 @@ watch(catalogId, () => {
           }}
         </button>
         <button
-          v-if="inLibrary && localGame && !busy"
+          v-if="inLibrary && localGame && !downloading"
           type="button"
           class="btn-ghost"
           @click="router.push(`/games/${localGame.id}`)"
@@ -215,8 +213,8 @@ watch(catalogId, () => {
           <p class="hint">
             {{
               inLibrary
-                ? "Este juego ya está en tu biblioteca."
-                : "Descargalo para agregarlo a tu biblioteca."
+                ? "Este juego ya está en tu biblioteca. La descarga sigue en segundo plano si salís de esta pantalla."
+                : "Agregalo a tu biblioteca; la descarga del ROM es otro paso."
             }}
           </p>
         </div>
