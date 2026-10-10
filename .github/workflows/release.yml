@@ -119,7 +119,7 @@ jobs:
             }
             $n = @(Get-ChildItem $OutDir -File -Recurse -ErrorAction SilentlyContinue).Count
             if ($n -lt 1) { throw "$Label no dejó archivos en $OutDir" }
-            Write-Host "$Label: $n archivo(s)"
+            Write-Host "${Label}: $n archivo(s)"
           }
 
           Expand-Vendor7z (Join-Path $tmp "bios.7z") $bios "bios.7z"
