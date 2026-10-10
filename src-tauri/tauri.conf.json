@@ -41,6 +41,7 @@
     "resources": [
       "resources/pcsx2/**/*",
       "resources/retroarch/**/*",
+      "resources/eden/**/*",
       "resources/emulators/packs/**/*"
     ],
     "windows": {

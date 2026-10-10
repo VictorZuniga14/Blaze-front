@@ -37,8 +37,10 @@ src-tauri/resources/emulators/packs/*.7z
 !src-tauri/resources/emulators/README.md
 !src-tauri/resources/emulators/packs/*.blaze-bundle.json
 
-# BIOS / firmware (no van al repo; van en el instalador local)
+# BIOS / firmware / keys (no van al repo; van en el instalador vía Release vendor)
 src-tauri/resources/pcsx2/bios/**
 src-tauri/resources/retroarch/system/**
+src-tauri/resources/eden/**
 !src-tauri/resources/pcsx2/bios/.gitkeep
 !src-tauri/resources/retroarch/system/.gitkeep
+!src-tauri/resources/eden/.gitkeep

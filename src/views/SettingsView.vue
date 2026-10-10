@@ -175,8 +175,8 @@ function entryDot(statusCode: string): string {
     <section class="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-6">
       <h2 class="mb-1 text-lg font-medium text-white">Emuladores (datos)</h2>
       <p class="mb-4 text-sm text-slate-400">
-        La BIOS de PS2 viene con el instalador. Keys y firmware de Switch los
-        aportás vos (carpeta / importar zip).
+        BIOS PS2, keys y firmware Switch vienen con el instalador. Las carpetas
+        de abajo son solo por si hace falta revisar o reemplazar a mano.
       </p>
       <ul class="mb-4 space-y-2 text-sm text-slate-300">
         <li>

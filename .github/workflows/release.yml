@@ -1,6 +1,8 @@
 # Publica el instalador Blaze (Windows NSIS) al pushear un tag v* o desde Actions.
-# Requisito: Release fijo "vendor" con pcsx2.7z + retroarch.7z + bios.7z
-# (bios.7z se extrae a resources/pcsx2/bios y va en el instalador).
+# Requisito: Release fijo "vendor" con:
+#   pcsx2.7z + retroarch.7z + bios.7z + eden-keys.7z + eden-firmware.7z
+#   (+ eden.7z opcional para runtime offline)
+# bios / keys / firmware se extraen a resources/ y van en el instalador.
 
 name: Release
 
@@ -72,38 +74,57 @@ jobs:
         run: |
           $packs = "src-tauri/resources/emulators/packs"
           $bios = "src-tauri/resources/pcsx2/bios"
+          $edenKeys = "src-tauri/resources/eden/keys"
+          $edenFw = "src-tauri/resources/eden/nand/system/Contents/registered"
           $tmp = "_vendor"
-          New-Item -ItemType Directory -Force -Path $packs, $bios, $tmp | Out-Null
+          New-Item -ItemType Directory -Force -Path $packs, $bios, $edenKeys, $edenFw, $tmp | Out-Null
 
           gh release download vendor --repo "${{ github.repository }}" --dir $tmp
           if ($LASTEXITCODE -ne 0) {
-            throw "Falta el Release 'vendor' con pcsx2.7z y retroarch.7z. Crealo una vez y volvé a correr el Action."
+            throw "Falta el Release 'vendor'. Crealo una vez y volvé a correr el Action."
           }
 
-          foreach ($name in @("pcsx2.7z", "retroarch.7z", "bios.7z")) {
+          $required = @(
+            "pcsx2.7z",
+            "retroarch.7z",
+            "bios.7z",
+            "eden-keys.7z",
+            "eden-firmware.7z"
+          )
+          foreach ($name in $required) {
             $src = Join-Path $tmp $name
             if (-not (Test-Path $src)) { throw "En Release vendor falta: $name" }
-            if ($name -ne "bios.7z") {
+            if ($name -in @("pcsx2.7z", "retroarch.7z")) {
               Copy-Item $src (Join-Path $packs $name) -Force
             }
+          }
+          # Runtime Eden offline (opcional).
+          $edenRt = Join-Path $tmp "eden.7z"
+          if (Test-Path $edenRt) {
+            Copy-Item $edenRt (Join-Path $packs "eden.7z") -Force
           }
 
           Get-ChildItem $tmp -Filter "*.blaze-bundle.json" -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName $packs -Force }
 
-          $biosZip = Join-Path $tmp "bios.7z"
-          Write-Host "Extrayendo bios.7z → resources/pcsx2/bios (va en el instalador)..."
-          if (Get-Command 7z -ErrorAction SilentlyContinue) {
-            & 7z x $biosZip "-o$bios" -y | Out-Null
-          } else {
-            choco install 7zip.install -y --no-progress
-            & "C:\Program Files\7-Zip\7z.exe" x $biosZip "-o$bios" -y | Out-Null
+          function Expand-Vendor7z([string]$Archive, [string]$OutDir, [string]$Label) {
+            Write-Host "Extrayendo $Label → $OutDir ..."
+            if (Get-Command 7z -ErrorAction SilentlyContinue) {
+              & 7z x $Archive "-o$OutDir" -y | Out-Null
+            } else {
+              if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
+                choco install 7zip.install -y --no-progress
+              }
+              & "C:\Program Files\7-Zip\7z.exe" x $Archive "-o$OutDir" -y | Out-Null
+            }
+            $n = @(Get-ChildItem $OutDir -File -Recurse -ErrorAction SilentlyContinue).Count
+            if ($n -lt 1) { throw "$Label no dejó archivos en $OutDir" }
+            Write-Host "$Label: $n archivo(s)"
           }
-          $biosCount = @(Get-ChildItem $bios -File -ErrorAction SilentlyContinue).Count
-          if ($biosCount -lt 1) {
-            throw "bios.7z no dejó archivos en $bios"
-          }
-          Write-Host "BIOS embebidas: $biosCount archivo(s)"
+
+          Expand-Vendor7z (Join-Path $tmp "bios.7z") $bios "bios.7z"
+          Expand-Vendor7z (Join-Path $tmp "eden-keys.7z") $edenKeys "eden-keys.7z"
+          Expand-Vendor7z (Join-Path $tmp "eden-firmware.7z") $edenFw "eden-firmware.7z"
 
       - name: Setup Node
         uses: actions/setup-node@v4

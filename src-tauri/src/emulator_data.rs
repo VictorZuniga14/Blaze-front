@@ -83,7 +83,7 @@ impl LaunchPrepError {
             Self::KeysMissing { keys_dir } => RuntimeLaunchPlan {
                 arguments: vec![],
                 error: Some(format!(
-                    "Faltan keys de Switch (prod.keys) en {}. Abrí la carpeta desde Configuración y pegá tus keys; Blaze no las redistribuye.",
+                    "Faltan keys de Switch (prod.keys) en {}. El instalador debería incluirlas; si faltan, pegá prod.keys ahí o reinstalá Blaze.",
                     keys_dir.display()
                 )),
                 error_code: Some("KeysMissing".to_string()),
@@ -91,7 +91,7 @@ impl LaunchPrepError {
             Self::FirmwareMissing { firmware_dir } => RuntimeLaunchPlan {
                 arguments: vec![],
                 error: Some(format!(
-                    "Falta firmware de Switch en {}. Importalo desde Configuración (zip .nca); Blaze no lo incluye en el instalador.",
+                    "Falta firmware de Switch en {}. El instalador debería incluirlo; si falta, importalo desde Configuración o reinstalá Blaze.",
                     firmware_dir.display()
                 )),
                 error_code: Some("FirmwareMissing".to_string()),
@@ -656,6 +656,20 @@ pub fn prepare_runtime_launch(
 
     if type_key == "eden" {
         if let Some(managed) = paths.blaze_managed_root.as_ref() {
+            // Keys + firmware del instalador → AppData managed (una vez).
+            let _ = seed_bundled_directory_if_available(
+                &app,
+                &["resources/eden/keys", "eden/keys"],
+                &eden_keys_dir(managed),
+            );
+            let _ = seed_bundled_directory_if_available(
+                &app,
+                &[
+                    "resources/eden/nand/system/Contents/registered",
+                    "eden/nand/system/Contents/registered",
+                ],
+                &eden_firmware_registered_dir(managed),
+            );
             if let Err(e) = sync_eden_portable_user(&exe, managed) {
                 return e.into_launch_plan();
             }
@@ -927,7 +941,7 @@ pub fn initialize_emulator_data(
     })?;
     let eden_keys = eden_keys_dir(&eden_root);
     let eden_fw = eden_firmware_registered_dir(&eden_root);
-    // Keys/firmware Switch: NO en instalador público. Seed opcional solo builds privadas.
+    // Keys + firmware Switch: embebidos en el instalador (vendor eden-keys / eden-firmware).
     seed_bundled_directory_if_available(
         &app,
         &["resources/eden/keys", "eden/keys"],

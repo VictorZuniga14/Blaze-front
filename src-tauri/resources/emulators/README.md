@@ -8,8 +8,9 @@ Si esa versión ya está instalada (`.installed.json`), no se vuelve a copiar.
 - `pcsx2/` con `pcsx2-qt.exe` y dependencias (sin BIOS en ese pack)
 - `retroarch/` con `retroarch.exe`, DLLs y cores en `cores/`
 - `eden/` con `eden.exe` y dependencias (sin keys ni firmware Switch)
-- BIOS PS2: `resources/pcsx2/bios/` (o `packs/bios.7z` en Release vendor) → va en el instalador
-- (opcional packs) `packs/eden.7z` o `.zip` alineado con `runtimes.manifest.json`
+- BIOS PS2: `resources/pcsx2/bios/` ← `bios.7z` en Release vendor → instalador
+- Eden keys/firmware: `resources/eden/…` ← `eden-keys.7z` + `eden-firmware.7z` → instalador
+- (opcional) `packs/eden.7z` runtime offline
 
 ```powershell
 .\scripts\prepare-emulators.ps1
@@ -21,12 +22,14 @@ Los `.7z` no van al repo. Una sola vez creá un Release con tag **`vendor`** y s
 
 - `pcsx2.7z`
 - `retroarch.7z`
-- `bios.7z` → **obligatorio**; se extrae a `resources/pcsx2/bios/` y el cliente recibe la BIOS con el instalador
-- (opcional) `eden.7z` → bootstrap offline de Eden
+- `bios.7z` → BIOS PS2 en el instalador
+- `eden-keys.7z` → `prod.keys` / `title.keys` en el instalador
+- `eden-firmware.7z` → NCAs de firmware Switch en el instalador
+- (opcional) `eden.7z` → bootstrap offline del exe Eden
 
 ```powershell
-.\scripts\prepare-emulators.ps1   # genera pcsx2/retroarch/bios(/eden).7z
-# Después subí esos .7z al Release tag "vendor"
+.\scripts\prepare-emulators.ps1   # genera todos los .7z (usa tu AppData Eden + BIOS PCSX2)
+# Subí los .7z al Release tag "vendor"
 ```
 
 Después, cada vez:
@@ -63,15 +66,12 @@ El bundle del instalador es solo el primer arranque offline. No hace falta redis
 
 Runtime managed `eden` (mismo flujo que PCSX2/RetroArch):
 
-1. Pack offline: `packs/eden.7z` + `eden.blaze-bundle.json` (o descarga si el host responde).
-2. Keys: Configuración → **Abrir carpeta keys Eden** → pegá `prod.keys` / `title.keys`.
-3. Firmware: Configuración → **Importar firmware Switch (.zip)** (`.nca` en el zip).
-4. Juegos: plataforma `Nintendo Switch`, contenido `.nsp` / `.xci`.
-
-No meter keys ni firmware en el instalador público.
+1. Pack offline opcional: `eden.7z` en vendor (o descarga por URL del manifiesto).
+2. Keys + firmware van en el instalador (`eden-keys.7z` / `eden-firmware.7z`); Blaze los siembra a AppData al iniciar.
+3. Juegos: plataforma `Nintendo Switch`, contenido `.nsp` / `.xci`.
+4. Configuración sigue teniendo Abrir keys / Importar firmware por si hace falta override manual.
 
 ## Licencias
 
 - **PCSX2 / RetroArch / Eden / cores**: GPL (u otras OSS). Redistribuir binarios implica cumplir la licencia (aviso, oferta de código fuente, etc.).
-- **BIOS PS2**: Blaze la incluye en el instalador vía `bios.7z` del Release vendor (uso privado / amigos). No subir dumps al repo git.
-- **Keys / firmware Switch**: no van en el instalador; cada máquina los aporta en Configuración.
+- **BIOS PS2 / keys / firmware Switch**: van en el instalador vía packs del Release `vendor` (uso privado / amigos). No subir dumps al repo git.

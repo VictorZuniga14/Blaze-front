@@ -9,6 +9,9 @@ param(
   [string]$EdenPath = "C:\Users\viczo\OneDrive\Escritorio\Eden",
   # Dump(s) PS2 para el instalador (Release vendor → bios.7z). Por defecto: carpeta bios de PCSX2.
   [string]$BiosPath = "",
+  # Keys + firmware Switch (Release vendor → eden-keys.7z / eden-firmware.7z).
+  # Por defecto: datos managed de Blaze ya configurados en esta PC.
+  [string]$EdenDataPath = "$env:APPDATA\com.blaze.app\emulator-data\eden",
   [string]$SevenZip = "C:\Program Files\NVIDIA Corporation\NVIDIA app\7z.exe"
 )
 
@@ -137,9 +140,52 @@ if (Test-Path $BiosPath) {
   Write-Host "  Pasá -BiosPath o subí bios.7z al Release vendor a mano."
 }
 
+# Keys + firmware Eden → resources/eden + packs (van en el instalador).
+$edenKeysSrc = Join-Path $EdenDataPath "keys"
+$edenFwSrc = Join-Path $EdenDataPath "nand\system\Contents\registered"
+$edenKeysDest = Join-Path $root "src-tauri\resources\eden\keys"
+$edenFwDest = Join-Path $root "src-tauri\resources\eden\nand\system\Contents\registered"
+New-Item -ItemType Directory -Force -Path $edenKeysDest, $edenFwDest | Out-Null
+
+if ((Test-Path (Join-Path $edenKeysSrc "prod.keys"))) {
+  Write-Host "Copiando Eden keys desde $edenKeysSrc..."
+  Get-ChildItem $edenKeysDest -File -ErrorAction SilentlyContinue | Remove-Item -Force
+  Copy-Item (Join-Path $edenKeysSrc "prod.keys") $edenKeysDest -Force
+  if (Test-Path (Join-Path $edenKeysSrc "title.keys")) {
+    Copy-Item (Join-Path $edenKeysSrc "title.keys") $edenKeysDest -Force
+  }
+  $keysPack = Join-Path $packs "eden-keys.7z"
+  if (Test-Path $keysPack) { Remove-Item $keysPack -Force }
+  & $SevenZip a -t7z -mx=5 -mmt=on $keysPack "$edenKeysDest\*" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "7z eden-keys falló: $LASTEXITCODE" }
+} else {
+  Write-Host "ADVERTENCIA: no hay prod.keys en $edenKeysSrc"
+}
+
+if (Test-Path $edenFwSrc) {
+  $fwCount = @(Get-ChildItem -LiteralPath $edenFwSrc -File -ErrorAction SilentlyContinue).Count
+  if ($fwCount -gt 0) {
+    Write-Host "Copiando Eden firmware ($fwCount archivos)..."
+    Get-ChildItem $edenFwDest -File -ErrorAction SilentlyContinue | Remove-Item -Force
+    robocopy $edenFwSrc $edenFwDest /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy Eden firmware falló: $LASTEXITCODE" }
+    $fwPack = Join-Path $packs "eden-firmware.7z"
+    if (Test-Path $fwPack) { Remove-Item $fwPack -Force }
+    Write-Host "Creando eden-firmware.7z (puede tardar)..."
+    & $SevenZip a -t7z -mx=5 -mmt=on $fwPack "$edenFwDest\*" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "7z eden-firmware falló: $LASTEXITCODE" }
+  } else {
+    Write-Host "ADVERTENCIA: carpeta firmware Eden vacía: $edenFwSrc"
+  }
+} else {
+  Write-Host "ADVERTENCIA: no hay firmware Eden en $edenFwSrc"
+}
+
 Write-Host "Listo. Packs para el instalador:"
 Get-ChildItem $packs | ForEach-Object {
   "{0,-32} {1,8:N1} MB" -f $_.Name, ($_.Length / 1MB)
 }
-Write-Host "Subí pcsx2.7z + retroarch.7z + bios.7z (+ eden.7z opcional) al Release tag vendor."
+Write-Host "Subí al Release tag vendor:"
+Write-Host "  pcsx2.7z + retroarch.7z + bios.7z + eden-keys.7z + eden-firmware.7z"
+Write-Host "  (+ eden.7z opcional para runtime offline)"
 Write-Host "Volvé a correr: npm run tauri -- build"
