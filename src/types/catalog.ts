@@ -16,6 +16,7 @@ export type CatalogGame = {
   publisherUserId: string;
   publisherUsername: string;
   localSourceGameId: string | null;
+  availableLanguages?: string[];
   createdAt: string;
   updatedAt: string;
 };

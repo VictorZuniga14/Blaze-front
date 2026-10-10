@@ -586,6 +586,9 @@ pub fn build_managed_launch_arguments(
                 .as_ref()
                 .expect("managed retroarch cfg path");
             let mut args = vec!["-c".to_string(), cfg.to_string_lossy().to_string()];
+            if start_fullscreen {
+                args.push("-f".to_string());
+            }
             args.extend(base_arguments.iter().cloned());
             args.push(content_path.to_string());
             Ok(args)

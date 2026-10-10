@@ -3,8 +3,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { launchConfigService } from "./launchConfig.service";
 import { gameRepository } from "../repositories/game.repository";
 import { runtimeRepository } from "../repositories/runtime.repository";
-import { isEdenRuntime } from "./ra/adapterKind";
+import { isEdenRuntime, resolveRuntimeKind } from "./ra/adapterKind";
 import { resolveRetroArchLaunchArguments } from "../utils/platformRuntime";
+import { runtimeConfigService } from "./runtimeConfig.service";
 import type {
   ActiveProcess,
   LastProcessResult,
@@ -82,6 +83,21 @@ export const launchService = {
         });
       }
 
+      let startFullscreen = true;
+      const runtimeKind = resolveRuntimeKind(runtime);
+      if (runtimeKind) {
+        try {
+          const video = await runtimeConfigService.readVideo({
+            executablePath,
+            runtimeKind,
+            runtimeSource: runtime.source ?? null,
+          });
+          startFullscreen = video.fullscreen;
+        } catch {
+          // Si no hay config de video, mantener fullscreen por defecto.
+        }
+      }
+
       const launchPlan = await invoke<{
         arguments: string[];
         error: string | null;
@@ -92,7 +108,7 @@ export const launchService = {
         executablePath,
         contentPath,
         baseArguments: resolvedArgs,
-        startFullscreen: true,
+        startFullscreen,
       });
       if (launchPlan.error) {
         throw new Error(launchPlan.error);

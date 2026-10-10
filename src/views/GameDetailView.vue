@@ -8,6 +8,8 @@ import DownloadProgressHud from "../components/DownloadProgressHud.vue";
 import AchievementsMedalIcon from "../components/icons/AchievementsMedalIcon.vue";
 import DownloadIcon from "../components/icons/DownloadIcon.vue";
 import FavoriteHeartIcon from "../components/icons/FavoriteHeartIcon.vue";
+import SettingsGearIcon from "../components/icons/SettingsGearIcon.vue";
+import GamePropertiesModal from "../components/GamePropertiesModal.vue";
 import PlaytimeClockIcon from "../components/icons/PlaytimeClockIcon.vue";
 import RaAchievementsShowcase from "../components/RaAchievementsShowcase.vue";
 import RaProgressPanel from "../components/RaProgressPanel.vue";
@@ -107,6 +109,7 @@ const r2ContentOptions = ref<R2OrphanObject[]>([]);
 const r2SelectedKey = ref<string | null>(null);
 const r2SuggestCover = ref<((key: string) => string | null) | null>(null);
 const needsCloudRepair = ref(false);
+const propertiesOpen = ref(false);
 const downloadJob = computed(() => catalogDownloads.jobFor(gameId.value));
 const repairingFromCloud = computed(() =>
   catalogDownloads.isActive(gameId.value),
@@ -738,6 +741,14 @@ async function confirmDelete() {
             <button
               type="button"
               class="tool-btn"
+              title="Propiedades"
+              @click="propertiesOpen = true"
+            >
+              <SettingsGearIcon />
+            </button>
+            <button
+              type="button"
+              class="tool-btn"
               :title="game.isFavorite ? 'Quitar favorito' : 'Favorito'"
               @click="library.toggleFavorite(game.id)"
             >
@@ -1012,6 +1023,14 @@ async function confirmDelete() {
         </div>
       </template>
     </template>
+
+    <GamePropertiesModal
+      v-if="game"
+      :open="propertiesOpen"
+      :game="game"
+      @close="propertiesOpen = false"
+      @updated="void ensureLoaded()"
+    />
 
     <ConfirmDialog
       :open="confirmOpen"

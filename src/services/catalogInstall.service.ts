@@ -19,6 +19,7 @@ import type { CatalogGame } from "../types/catalog";
 import type { Game } from "../types/game";
 import { ensureRuntime } from "./ensureRuntime.service";
 import { resolveRetroArchLaunchArguments } from "../utils/platformRuntime";
+import { resolveAvailableLanguages } from "../utils/gameLanguages";
 
 export type CatalogInstallProgress = {
   phase: "resolving" | "downloading" | "installing";
@@ -171,6 +172,7 @@ export const catalogInstallService = {
       }
     }
 
+    const langs = resolveAvailableLanguages(catalog.availableLanguages);
     const game = await gameService.createGame({
       title: catalog.title,
       description: catalog.description,
@@ -181,11 +183,13 @@ export const catalogInstallService = {
       retroAchievementsGameId: catalog.retroAchievementsGameId,
       coverPath: catalog.coverUrl,
       status: "published",
+      availableLanguages: langs,
     });
 
     const updatedAt = new Date().toISOString();
     await gameRepository.setStatus(game.id, "published", updatedAt);
     await gameRepository.setCatalogRemoteId(game.id, catalog.id, updatedAt);
+    await gameRepository.setLanguages(game.id, langs, null, updatedAt);
 
     const fresh = await gameRepository.findById(game.id);
     if (!fresh) throw new Error("No se pudo agregar el juego a la biblioteca.");

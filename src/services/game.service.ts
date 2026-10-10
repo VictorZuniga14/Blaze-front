@@ -29,6 +29,8 @@ function validateWritable(input: GameWritableFields): {
   isFavorite: boolean;
   /** undefined = no cambiar al actualizar */
   retroAchievementsGameId: number | null | undefined;
+  availableLanguages?: string[] | null;
+  preferredLanguage?: string | null;
 } {
   const title = input.title?.trim() ?? "";
   if (!title) {
@@ -88,6 +90,8 @@ function validateWritable(input: GameWritableFields): {
     coverPath,
     isFavorite: Boolean(input.isFavorite),
     retroAchievementsGameId,
+    availableLanguages: input.availableLanguages,
+    preferredLanguage: input.preferredLanguage,
   };
 }
 
@@ -118,6 +122,10 @@ export const gameService = {
       status: "draft",
       retroAchievementsGameId: fields.retroAchievementsGameId ?? null,
       catalogRemoteId: null,
+      availableLanguages: fields.availableLanguages?.length
+        ? fields.availableLanguages
+        : ["en"],
+      preferredLanguage: fields.preferredLanguage ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -148,11 +156,39 @@ export const gameService = {
           ? existing.retroAchievementsGameId
           : fields.retroAchievementsGameId,
       catalogRemoteId: existing.catalogRemoteId,
+      availableLanguages:
+        fields.availableLanguages?.length
+          ? fields.availableLanguages
+          : existing.availableLanguages,
+      preferredLanguage:
+        fields.preferredLanguage === undefined
+          ? existing.preferredLanguage
+          : fields.preferredLanguage,
       id: existing.id,
       createdAt: existing.createdAt,
       updatedAt: new Date().toISOString(),
     };
     return gameRepository.update(updated);
+  },
+
+  async setPreferredLanguage(
+    id: string,
+    preferredLanguage: string | null,
+  ): Promise<Game> {
+    const existing = await gameRepository.findById(id);
+    if (!existing) {
+      throw new Error("El juego no existe.");
+    }
+    const updatedAt = new Date().toISOString();
+    await gameRepository.setLanguages(
+      id,
+      existing.availableLanguages,
+      preferredLanguage,
+      updatedAt,
+    );
+    const fresh = await gameRepository.findById(id);
+    if (!fresh) throw new Error("El juego no existe.");
+    return fresh;
   },
 
   async deleteGame(id: string): Promise<void> {

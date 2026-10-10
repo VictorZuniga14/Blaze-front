@@ -5,6 +5,7 @@ mod process_manager;
 mod ra_identify;
 mod ra_status;
 mod emulator_data;
+mod eden_config;
 mod runtime_install;
 
 use catalog_transfer::{
@@ -22,6 +23,12 @@ use emulator_data::{
     apply_managed_ra_credentials, import_eden_firmware_zip, initialize_emulator_data,
     install_eden_title_nsps, open_managed_eden_keys_folder, open_managed_pcsx2_bios_folder,
     prepare_runtime_launch,
+};
+use eden_config::{
+    launch_eden_config_ui, launch_runtime_config_ui, list_audio_output_devices,
+    list_game_controllers, read_eden_audio_settings, read_runtime_audio_settings,
+    read_runtime_video_settings, reveal_path_in_explorer, write_eden_audio_settings,
+    write_runtime_audio_settings, write_runtime_video_settings,
 };
 use runtime_install::{
     cancel_runtime_install, install_runtime, runtime_manifest_ids, runtime_manifest_list,
@@ -82,7 +89,18 @@ pub fn run() {
             import_eden_firmware_zip,
             install_eden_title_nsps,
             initialize_emulator_data,
-            apply_managed_ra_credentials
+            apply_managed_ra_credentials,
+            list_audio_output_devices,
+            list_game_controllers,
+            read_eden_audio_settings,
+            write_eden_audio_settings,
+            launch_eden_config_ui,
+            read_runtime_audio_settings,
+            write_runtime_audio_settings,
+            read_runtime_video_settings,
+            write_runtime_video_settings,
+            launch_runtime_config_ui,
+            reveal_path_in_explorer
         ])
         .setup(|app| {
             #[cfg(desktop)]

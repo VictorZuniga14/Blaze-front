@@ -123,6 +123,19 @@ export const sqliteRepository = {
         "ALTER TABLE games ADD COLUMN catalog_remote_id TEXT",
       );
     }
+    const gameColumns2 = await db.select<ColumnInfo[]>(
+      "PRAGMA table_info(games)",
+    );
+    if (!gameColumns2.some((col) => col.name === "available_languages")) {
+      await db.execute(
+        "ALTER TABLE games ADD COLUMN available_languages TEXT",
+      );
+    }
+    if (!gameColumns2.some((col) => col.name === "preferred_language")) {
+      await db.execute(
+        "ALTER TABLE games ADD COLUMN preferred_language TEXT",
+      );
+    }
 
     const runtimeColumns = await db.select<ColumnInfo[]>(
       "PRAGMA table_info(runtimes)",

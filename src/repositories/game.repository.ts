@@ -1,5 +1,10 @@
 import { getDatabase } from "./sqlite.repository";
 import type { Game, GameStatus } from "../types/game";
+import {
+  languagesToJson,
+  parseLanguagesJson,
+  resolveAvailableLanguages,
+} from "../utils/gameLanguages";
 
 type GameRow = {
   id: string;
@@ -15,6 +20,8 @@ type GameRow = {
   status: string | null;
   retro_achievements_game_id: number | null;
   catalog_remote_id: string | null;
+  available_languages: string | null;
+  preferred_language: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -38,6 +45,10 @@ function mapRow(row: GameRow): Game {
     status: normalizeStatus(row.status),
     retroAchievementsGameId: row.retro_achievements_game_id ?? null,
     catalogRemoteId: row.catalog_remote_id ?? null,
+    availableLanguages: resolveAvailableLanguages(
+      parseLanguagesJson(row.available_languages),
+    ),
+    preferredLanguage: row.preferred_language?.trim() || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -45,7 +56,8 @@ function mapRow(row: GameRow): Game {
 
 const SELECT_COLS = `id, title, description, developer, publisher, genre, platform,
               release_year, cover_path, is_favorite, status, retro_achievements_game_id,
-              catalog_remote_id, created_at, updated_at`;
+              catalog_remote_id, available_languages, preferred_language,
+              created_at, updated_at`;
 
 export const gameRepository = {
   async findAll(): Promise<Game[]> {
@@ -77,8 +89,9 @@ export const gameRepository = {
       `INSERT INTO games (
          id, title, description, developer, publisher, genre, platform,
          release_year, cover_path, is_favorite, status, retro_achievements_game_id,
-         catalog_remote_id, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+         catalog_remote_id, available_languages, preferred_language,
+         created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         game.id,
         game.title,
@@ -93,6 +106,8 @@ export const gameRepository = {
         game.status,
         game.retroAchievementsGameId,
         game.catalogRemoteId,
+        languagesToJson(game.availableLanguages),
+        game.preferredLanguage,
         game.createdAt,
         game.updatedAt,
       ],
@@ -116,8 +131,10 @@ export const gameRepository = {
          status = $10,
          retro_achievements_game_id = $11,
          catalog_remote_id = $12,
-         updated_at = $13
-       WHERE id = $14`,
+         available_languages = $13,
+         preferred_language = $14,
+         updated_at = $15
+       WHERE id = $16`,
       [
         game.title,
         game.description,
@@ -131,6 +148,8 @@ export const gameRepository = {
         game.status,
         game.retroAchievementsGameId,
         game.catalogRemoteId,
+        languagesToJson(game.availableLanguages),
+        game.preferredLanguage,
         game.updatedAt,
         game.id,
       ],
@@ -192,6 +211,24 @@ export const gameRepository = {
     await db.execute(
       `UPDATE games SET catalog_remote_id = $1, updated_at = $2 WHERE id = $3`,
       [catalogRemoteId, updatedAt, id],
+    );
+  },
+
+  async setLanguages(
+    id: string,
+    availableLanguages: string[],
+    preferredLanguage: string | null,
+    updatedAt: string,
+  ): Promise<void> {
+    const db = await getDatabase();
+    await db.execute(
+      `UPDATE games SET available_languages = $1, preferred_language = $2, updated_at = $3 WHERE id = $4`,
+      [
+        languagesToJson(availableLanguages),
+        preferredLanguage,
+        updatedAt,
+        id,
+      ],
     );
   },
 

@@ -17,6 +17,10 @@ export type Game = {
   retroAchievementsGameId: number | null;
   /** Id en el catálogo Blaze (servidor), si vino de descarga o se publicó. */
   catalogRemoteId: string | null;
+  /** Idiomas que declara el juego (códigos: en, es, …). Vacío → se trata como solo en. */
+  availableLanguages: string[];
+  /** Preferencia del usuario; null = usar el primero disponible. */
+  preferredLanguage: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -34,6 +38,8 @@ export type GameWritableFields = {
   isFavorite?: boolean;
   status?: GameStatus;
   retroAchievementsGameId?: number | null;
+  availableLanguages?: string[] | null;
+  preferredLanguage?: string | null;
 };
 
 export type GameSort =
