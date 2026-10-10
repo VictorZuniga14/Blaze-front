@@ -381,7 +381,8 @@ fn resolve_resource_path(app: &AppHandle, relative: &str) -> Option<PathBuf> {
     None
 }
 
-/// Pack offline del instalador: `resources/emulators/packs/<id>.7z` + `<id>.blaze-bundle.json`.
+/// Pack offline del instalador: `resources/emulators/packs/<id>.7z`
+/// (+ opcional `<id>.blaze-bundle.json` al lado).
 fn resolve_bundled_emulator_pack(app: &AppHandle, id: &str) -> Option<(PathBuf, PathBuf)> {
     let archive_relatives = [
         format!("resources/emulators/packs/{id}.7z"),
@@ -393,15 +394,13 @@ fn resolve_bundled_emulator_pack(app: &AppHandle, id: &str) -> Option<(PathBuf, 
     ];
     let archive = archive_relatives
         .iter()
-        .find_map(|r| resolve_resource_path(app, r))?;
+        .find_map(|r| resolve_resource_path(app, r).filter(|p| p.is_file()))?;
+    // Meta opcional: si no está, devolvemos path "virtual" (mismo dir) y el caller sintetiza.
     let meta = meta_relatives
         .iter()
-        .find_map(|r| resolve_resource_path(app, r))?;
-    if archive.is_file() && meta.is_file() {
-        Some((archive, meta))
-    } else {
-        None
-    }
+        .find_map(|r| resolve_resource_path(app, r).filter(|p| p.is_file()))
+        .unwrap_or_else(|| archive.with_extension("blaze-bundle.json"));
+    Some((archive, meta))
 }
 
 /// Carpeta suelta (dev): `resources/emulators/<id>/`.
@@ -551,9 +550,12 @@ fn try_install_from_bundle(
 
     // 1) Pack .7z del instalador (camino principal).
     if let Some((archive, meta_path)) = resolve_bundled_emulator_pack(app, &entry.id) {
-        let Some(meta) = read_bundle_meta_file(&meta_path) else {
-            return Ok(None);
-        };
+        // Si falta o no parsea el json, igual usamos el .7z con la versión del manifiesto
+        // (antes se iba a la URL remota y Eden fallaba en git.eden-emu.dev).
+        let meta = read_bundle_meta_file(&meta_path).unwrap_or(BundleMeta {
+            version: entry.version.clone(),
+            sha256: String::new(),
+        });
         if !bundle_meta_matches(&meta, entry) {
             return Ok(None);
         }

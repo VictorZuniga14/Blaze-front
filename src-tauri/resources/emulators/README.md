@@ -20,16 +20,16 @@ Si esa versión ya está instalada (`.installed.json`), no se vuelve a copiar.
 
 Los `.7z` no van al repo. Una sola vez creá un Release con tag **`vendor`** y subí:
 
-- `pcsx2.7z`
-- `retroarch.7z`
+- `pcsx2.7z` + `retroarch.7z` + **`eden.7z`** (runtimes offline)
 - `bios.7z` → BIOS PS2 en el instalador
-- `eden-keys.7z` → `prod.keys` / `title.keys` en el instalador
-- `eden-firmware.7z` → NCAs de firmware Switch en el instalador
-- (opcional) `eden.7z` → bootstrap offline del exe Eden
+- `eden-keys.7z` / `eden-firmware.7z` → keys + firmware Switch en el instalador
+
+Los `*.blaze-bundle.json` **no hace falta subirlos**: el workflow de Release los genera solo
+(hash del `.7z` + versión del manifiesto). Sin ese json, Blaze ignora el pack y baja por URL.
 
 ```powershell
-.\scripts\prepare-emulators.ps1   # genera todos los .7z (usa tu AppData Eden + BIOS PCSX2)
-# Subí los .7z al Release tag "vendor"
+.\scripts\prepare-emulators.ps1   # genera los .7z
+# Subí al Release tag "vendor" solo los .7z listados arriba
 ```
 
 Después, cada vez:

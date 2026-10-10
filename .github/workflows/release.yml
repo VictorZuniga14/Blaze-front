@@ -98,14 +98,33 @@ jobs:
               Copy-Item $src (Join-Path $packs $name) -Force
             }
           }
-          # Runtime Eden offline (opcional).
+          # Runtime Eden offline (obligatorio para Switch sin red a git.eden-emu.dev).
           $edenRt = Join-Path $tmp "eden.7z"
-          if (Test-Path $edenRt) {
-            Copy-Item $edenRt (Join-Path $packs "eden.7z") -Force
+          if (-not (Test-Path $edenRt)) {
+            throw "En Release vendor falta: eden.7z"
           }
+          Copy-Item $edenRt (Join-Path $packs "eden.7z") -Force
 
+          # JSON de vendor si existen (opcionales).
           Get-ChildItem $tmp -Filter "*.blaze-bundle.json" -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName $packs -Force }
+
+          # Siempre generar/actualizar blaze-bundle.json desde el .7z real + versión del manifiesto.
+          # Sin este archivo hermano, Blaze ignora el pack offline y baja por URL (falla Eden).
+          $manifest = Get-Content "src-tauri/runtimes.manifest.json" -Raw | ConvertFrom-Json
+          foreach ($id in @("pcsx2", "retroarch", "eden")) {
+            $archive = Join-Path $packs "$id.7z"
+            if (-not (Test-Path $archive)) {
+              throw "Falta pack offline tras copiar vendor: $id.7z"
+            }
+            $entry = $manifest.runtimes | Where-Object { $_.id -eq $id }
+            if (-not $entry) { throw "Falta $id en runtimes.manifest.json" }
+            $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            $meta = @{ version = [string]$entry.version; sha256 = $hash } | ConvertTo-Json
+            $metaPath = Join-Path $packs "$id.blaze-bundle.json"
+            Set-Content -LiteralPath $metaPath -Value $meta -Encoding utf8
+            Write-Host "bundle meta $id → version=$($entry.version) sha256=$hash"
+          }
 
           function Expand-Vendor7z([string]$Archive, [string]$OutDir, [string]$Label) {
             Write-Host "Extrayendo $Label → $OutDir ..."
