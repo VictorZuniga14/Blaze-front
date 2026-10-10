@@ -217,8 +217,25 @@ function goLibrary() {
       </form>
     </div>
 
-    <div v-if="loading" class="py-12 text-center text-slate-400">
-      Cargando runtimes...
+    <div
+      v-if="loading && runtimes.length === 0"
+      class="space-y-3"
+      aria-hidden="true"
+    >
+      <div
+        v-for="n in 3"
+        :key="n"
+        class="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-900/40 px-4 py-3"
+      >
+        <div class="min-w-0 flex-1 space-y-2">
+          <div
+            class="h-4 w-40 rounded bg-white/10 animate-pulse"
+          />
+          <div
+            class="h-3 w-3/4 max-w-md rounded bg-white/5 animate-pulse"
+          />
+        </div>
+      </div>
     </div>
 
     <div

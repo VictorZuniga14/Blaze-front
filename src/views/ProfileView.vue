@@ -99,7 +99,50 @@ onBeforeUnmount(() => {
 <template>
   <main class="profile-page">
     <p v-if="error" class="profile-error">{{ error }}</p>
-    <p v-else-if="loading" class="profile-muted">Cargando perfil...</p>
+    <div v-else-if="loading" class="profile-skel" aria-hidden="true">
+      <section class="profile-skel__hero">
+        <div class="profile-skel__avatar" />
+        <div class="profile-skel__meta">
+          <div class="profile-skel__line profile-skel__line--title" />
+          <div class="profile-skel__line" />
+          <div class="profile-skel__line profile-skel__line--short" />
+          <div class="profile-skel__stats">
+            <div
+              v-for="n in 4"
+              :key="`s-${n}`"
+              class="profile-skel__line profile-skel__line--stat"
+            />
+          </div>
+        </div>
+      </section>
+      <div class="profile-skel__layout">
+        <div class="profile-skel__panel">
+          <div class="profile-skel__line profile-skel__line--heading" />
+          <div
+            v-for="n in 6"
+            :key="`r-${n}`"
+            class="profile-skel__row"
+          >
+            <div class="profile-skel__line" />
+            <div class="profile-skel__line profile-skel__line--tiny" />
+          </div>
+        </div>
+        <div class="profile-skel__panel">
+          <div class="profile-skel__line profile-skel__line--heading" />
+          <div
+            v-for="n in 3"
+            :key="`g-${n}`"
+            class="profile-skel__game"
+          >
+            <div class="profile-skel__game-icon" />
+            <div class="profile-skel__game-meta">
+              <div class="profile-skel__line" />
+              <div class="profile-skel__line profile-skel__line--short" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <template v-else-if="profile">
       <section class="profile-hero">
@@ -289,6 +332,147 @@ onBeforeUnmount(() => {
   margin: 0;
   color: #8ba3bc;
   font-size: 14px;
+}
+
+.profile-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.profile-skel__hero {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.profile-skel__avatar {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: linear-gradient(110deg, #171a21 0%, #2a475e 45%, #171a21 90%);
+  background-size: 200% 100%;
+  animation: profile-skel-shimmer 1.25s ease-in-out infinite;
+}
+
+.profile-skel__meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.profile-skel__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.profile-skel__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 860px) {
+  .profile-skel__layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.profile-skel__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(23, 26, 33, 0.65);
+}
+
+.profile-skel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.profile-skel__game {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-skel__game-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: linear-gradient(110deg, #171a21 0%, #2a475e 45%, #171a21 90%);
+  background-size: 200% 100%;
+  animation: profile-skel-shimmer 1.25s ease-in-out infinite;
+}
+
+.profile-skel__game-meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-skel__line {
+  height: 12px;
+  width: 100%;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  animation: profile-skel-pulse 1.25s ease-in-out infinite;
+}
+
+.profile-skel__line--title {
+  width: 180px;
+  height: 22px;
+}
+
+.profile-skel__line--heading {
+  width: 55%;
+  height: 16px;
+  margin-bottom: 4px;
+}
+
+.profile-skel__line--short {
+  width: 40%;
+}
+
+.profile-skel__line--stat {
+  width: 100%;
+  height: 14px;
+}
+
+.profile-skel__line--tiny {
+  width: 48px;
+  flex-shrink: 0;
+}
+
+@keyframes profile-skel-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes profile-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .profile-note {

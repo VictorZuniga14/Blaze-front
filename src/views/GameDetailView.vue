@@ -10,6 +10,7 @@ import DownloadIcon from "../components/icons/DownloadIcon.vue";
 import FavoriteHeartIcon from "../components/icons/FavoriteHeartIcon.vue";
 import SettingsGearIcon from "../components/icons/SettingsGearIcon.vue";
 import GamePropertiesModal from "../components/GamePropertiesModal.vue";
+import DetailPageSkeleton from "../components/DetailPageSkeleton.vue";
 import PlaytimeClockIcon from "../components/icons/PlaytimeClockIcon.vue";
 import RaAchievementsShowcase from "../components/RaAchievementsShowcase.vue";
 import RaProgressPanel from "../components/RaProgressPanel.vue";
@@ -604,12 +605,9 @@ async function confirmDelete() {
       {{ playNotice }}
     </p>
 
-    <div
-      v-if="library.loading || loadingConfig || contentLoading"
-      class="detail-loading"
-    >
-      Cargando...
-    </div>
+    <DetailPageSkeleton
+      v-if="(library.loading || loadingConfig || contentLoading) && !game"
+    />
 
     <template v-else-if="game">
       <!-- Hero + barra de acción (vista biblioteca publicada) -->

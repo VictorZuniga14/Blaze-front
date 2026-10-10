@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import GameCard from "../components/GameCard.vue";
+import GameCardSkeleton from "../components/GameCardSkeleton.vue";
 import { useAuthStore } from "../stores/auth";
 import { useLibraryStore } from "../stores/library";
 import { usePlayHistoryStore } from "../stores/playHistory";
@@ -195,8 +196,11 @@ function goNew() {
           </div>
         </header>
 
-        <div v-if="loading" class="home-muted">Cargando biblioteca...</div>
-        <div v-else-if="filteredGames.length === 0" class="home-muted">
+        <GameCardSkeleton v-if="loading && games.length === 0" :count="6" />
+        <div
+          v-else-if="!loading && filteredGames.length === 0"
+          class="home-muted"
+        >
           No hay juegos que coincidan con tu búsqueda o filtros.
         </div>
         <div v-else class="home-grid">

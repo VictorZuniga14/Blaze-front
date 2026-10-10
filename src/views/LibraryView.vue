@@ -65,10 +65,17 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => catalogCovers.byCatalogId,
+  () => {
+    brokenSidebarCovers.value = new Set();
+  },
+);
+
 onMounted(() => {
   void (async () => {
+    // loadLibrary ya refresca portadas del catálogo en paralelo al sync.
     await library.loadLibrary();
-    void catalogCovers.refresh();
     void raProgress.hydrateLibraryCache(
       library.games.map((game) => ({
         id: game.id,
@@ -111,8 +118,21 @@ onMounted(() => {
       </button>
 
       <ul v-if="myGamesOpen" class="library-side__list">
-        <li v-if="loading" class="library-side__empty">Cargando...</li>
-        <li v-else-if="sidebarGames.length === 0" class="library-side__empty">
+        <template v-if="loading && sidebarGames.length === 0">
+          <li
+            v-for="n in 4"
+            :key="`skel-${n}`"
+            class="library-side__skel"
+            aria-hidden="true"
+          >
+            <span class="library-side__skel-icon" />
+            <span class="library-side__skel-line" />
+          </li>
+        </template>
+        <li
+          v-else-if="!loading && sidebarGames.length === 0"
+          class="library-side__empty"
+        >
           Sin juegos
         </li>
         <li v-for="game in sidebarGames" :key="game.id">
@@ -243,6 +263,50 @@ onMounted(() => {
   padding: 12px;
   color: #8f98a0;
   font-size: 13px;
+}
+
+.library-side__skel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px 5px 14px;
+}
+
+.library-side__skel-icon {
+  width: 28px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: linear-gradient(110deg, #1b2838 0%, #2a475e 45%, #1b2838 90%);
+  background-size: 200% 100%;
+  animation: library-skel 1.25s ease-in-out infinite;
+}
+
+.library-side__skel-line {
+  height: 10px;
+  flex: 1;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  animation: library-skel-pulse 1.25s ease-in-out infinite;
+}
+
+@keyframes library-skel {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes library-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .library-side__item {

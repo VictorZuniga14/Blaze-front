@@ -122,7 +122,12 @@ export const useLibraryStore = defineStore("library", () => {
         await localDbService.init();
         ready.value = true;
       }
-      await syncCloudLibrary();
+      // Primero lo local (portadas/cards al toque); el sync cloud después.
+      games.value = await gameService.listGames();
+      loading.value = false;
+
+      const covers = useCatalogCoversStore();
+      await Promise.all([syncCloudLibrary(), covers.refresh()]);
       games.value = await gameService.listGames();
     } catch (err) {
       error.value = userFacingError(

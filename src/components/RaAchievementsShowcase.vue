@@ -76,9 +76,19 @@ function badgeSrc(ach: RaAchievement): string | null {
       </button>
     </header>
 
-    <p v-if="loading && !progress" class="ra-show__muted">
-      Consultando RetroAchievements…
-    </p>
+    <div
+      v-if="loading && !progress"
+      class="ra-show__skel"
+      aria-hidden="true"
+    >
+      <div v-for="n in 4" :key="n" class="ra-show__skel-item">
+        <div class="ra-show__skel-badge" />
+        <div class="ra-show__skel-lines">
+          <div class="ra-show__skel-line" />
+          <div class="ra-show__skel-line ra-show__skel-line--short" />
+        </div>
+      </div>
+    </div>
     <p v-else-if="error && !progress" class="ra-show__warn">{{ error }}</p>
     <p v-else-if="!progress" class="ra-show__muted">
       Todavía no hay progreso de logros para este juego.
@@ -205,6 +215,65 @@ function badgeSrc(ach: RaAchievement): string | null {
   margin: 0;
   color: #8f98a0;
   font-size: 13px;
+}
+
+.ra-show__skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ra-show__skel-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ra-show__skel-badge {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: linear-gradient(110deg, #171a21 0%, #2a475e 45%, #171a21 90%);
+  background-size: 200% 100%;
+  animation: ra-skel-shimmer 1.25s ease-in-out infinite;
+}
+
+.ra-show__skel-lines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ra-show__skel-line {
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  animation: ra-skel-pulse 1.25s ease-in-out infinite;
+}
+
+.ra-show__skel-line--short {
+  width: 50%;
+}
+
+@keyframes ra-skel-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes ra-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .ra-show__warn {

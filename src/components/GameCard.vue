@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import type { Game } from "../types/game";
 import { useCatalogCoversStore } from "../stores/catalogCovers";
 import { usePlayHistoryStore } from "../stores/playHistory";
@@ -24,6 +24,17 @@ const ra = useRaProgressStore();
 const playHistory = usePlayHistoryStore();
 const catalogCovers = useCatalogCoversStore();
 const coverSrc = computed(() => catalogCovers.coverForGame(props.game));
+const coverBroken = ref(false);
+const showCover = computed(() => Boolean(coverSrc.value) && !coverBroken.value);
+
+watch(coverSrc, () => {
+  coverBroken.value = false;
+});
+
+function onCoverError(): void {
+  coverBroken.value = true;
+}
+
 const raModel = computed(() =>
   ra.cardModel(props.game.id, props.game.retroAchievementsGameId),
 );
@@ -45,14 +56,14 @@ const playModel = computed(() => playCardModel(playHistory.statsFor(props.game.i
       class="relative flex aspect-[3/4] items-center justify-center bg-gradient-to-b from-slate-800 to-slate-950"
     >
       <img
-        v-if="coverSrc"
-        :src="coverSrc"
+        v-if="showCover"
+        :src="coverSrc!"
         :alt="game.title"
         class="absolute inset-0 h-full w-full object-cover object-top"
-        @error="($event.target as HTMLImageElement).style.display = 'none'"
+        @error="onCoverError"
       />
       <span
-        v-if="!coverSrc"
+        v-else
         class="px-3 text-center text-xs font-medium uppercase tracking-wider text-slate-500"
       >
         {{ game.title }}

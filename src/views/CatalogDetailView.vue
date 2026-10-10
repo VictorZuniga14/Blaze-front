@@ -12,6 +12,7 @@ import { ApiError } from "../services/api.client";
 import { gameTagLabels } from "../utils/raBadge";
 import { resolveGameBanner } from "../utils/gameBanner";
 import DownloadProgressHud from "../components/DownloadProgressHud.vue";
+import DetailPageSkeleton from "../components/DetailPageSkeleton.vue";
 import AddPlusIcon from "../components/icons/AddPlusIcon.vue";
 import DownloadIcon from "../components/icons/DownloadIcon.vue";
 import type { CatalogGame } from "../types/catalog";
@@ -147,7 +148,7 @@ watch(
       Iniciá sesión para ver el catálogo.
     </p>
     <p v-else-if="error" class="banner banner--error">{{ error }}</p>
-    <p v-if="loading" class="muted">Cargando…</p>
+    <DetailPageSkeleton v-if="loading" />
 
     <template v-else-if="game">
       <section class="hero" :class="{ 'hero--has-banner': !!bannerSrc }">

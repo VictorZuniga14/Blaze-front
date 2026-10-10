@@ -10,6 +10,7 @@ import { formatBytes } from "../services/catalogTransfer.service";
 import { ApiError } from "../services/api.client";
 import type { CatalogGame } from "../types/catalog";
 import bannerJuegosAntiguos from "../assets/banner_juegos_antiguos_3840x1240.png";
+import GameCardSkeleton from "../components/GameCardSkeleton.vue";
 
 type CatalogSort = "title-asc" | "title-desc" | "newest";
 
@@ -146,7 +147,10 @@ onMounted(() => {
         {{ error }}
       </p>
 
-      <p v-if="loading" class="catalog-muted">Cargando catálogo…</p>
+      <GameCardSkeleton
+        v-if="loading && isAuthenticated"
+        :count="8"
+      />
 
       <section
         v-else-if="isAuthenticated && !loading && sortedGames.length === 0"
