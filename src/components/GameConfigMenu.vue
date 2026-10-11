@@ -1,31 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import SettingsGearIcon from "./icons/SettingsGearIcon.vue";
 
-const props = defineProps<{
-  isFavorite: boolean;
+defineProps<{
   canUninstall: boolean;
 }>();
 
 const emit = defineEmits<{
-  toggleFavorite: [];
   uninstall: [];
   properties: [];
 }>();
 
 const open = ref(false);
 const manageOpen = ref(false);
-const addToOpen = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
-
-const favoriteLabel = computed(() =>
-  props.isFavorite ? "Quitar de Favoritos" : "Agregar a Favoritos",
-);
 
 function closeAll(): void {
   open.value = false;
   manageOpen.value = false;
-  addToOpen.value = false;
 }
 
 function toggle(): void {
@@ -33,19 +25,13 @@ function toggle(): void {
   else open.value = true;
 }
 
-function onFavorite(): void {
-  emit("toggleFavorite");
+function onUninstall(): void {
+  emit("uninstall");
   closeAll();
 }
 
 function onProperties(): void {
   emit("properties");
-  closeAll();
-}
-
-function onUninstall(): void {
-  if (!props.canUninstall) return;
-  emit("uninstall");
   closeAll();
 }
 
@@ -67,7 +53,6 @@ watch(open, (isOpen) => {
     document.removeEventListener("click", onDocumentClick);
     document.removeEventListener("keydown", onKeydown);
     manageOpen.value = false;
-    addToOpen.value = false;
   }
 });
 
@@ -91,36 +76,6 @@ onBeforeUnmount(() => {
     </button>
 
     <div v-if="open" class="cfg-menu__panel" role="menu">
-      <button
-        type="button"
-        class="cfg-menu__item"
-        role="menuitem"
-        @click="onFavorite"
-      >
-        {{ favoriteLabel }}
-      </button>
-
-      <div
-        class="cfg-menu__item cfg-menu__item--sub"
-        @mouseenter="addToOpen = true"
-        @mouseleave="addToOpen = false"
-      >
-        <button
-          type="button"
-          class="cfg-menu__item-btn"
-          role="menuitem"
-          aria-haspopup="true"
-          :aria-expanded="addToOpen"
-          disabled
-        >
-          <span>Agregar a</span>
-          <span class="cfg-menu__chevron" aria-hidden="true">›</span>
-        </button>
-        <div v-if="addToOpen" class="cfg-menu__submenu" role="menu">
-          <p class="cfg-menu__empty">Sin listas aún</p>
-        </div>
-      </div>
-
       <div
         class="cfg-menu__item cfg-menu__item--sub"
         @mouseenter="manageOpen = true"
@@ -243,20 +198,14 @@ onBeforeUnmount(() => {
 .cfg-menu__submenu {
   position: absolute;
   top: -6px;
-  left: calc(100% + 2px);
+  right: calc(100% + 2px);
+  left: auto;
   z-index: 41;
   min-width: 180px;
   padding: 6px 0;
   background: #1b2838;
   border: 1px solid #000;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
-}
-
-.cfg-menu__empty {
-  margin: 0;
-  padding: 8px 16px;
-  color: #8f98a0;
-  font-size: 13px;
 }
 
 .cfg-menu__sep {

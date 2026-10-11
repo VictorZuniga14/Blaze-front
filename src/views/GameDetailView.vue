@@ -8,8 +8,8 @@ import DownloadProgressHud from "../components/DownloadProgressHud.vue";
 import AchievementsMedalIcon from "../components/icons/AchievementsMedalIcon.vue";
 import DownloadIcon from "../components/icons/DownloadIcon.vue";
 import FavoriteHeartIcon from "../components/icons/FavoriteHeartIcon.vue";
-import GameConfigMenu from "../components/GameConfigMenu.vue";
 import GamePropertiesModal from "../components/GamePropertiesModal.vue";
+import GameConfigMenu from "../components/GameConfigMenu.vue";
 import UninstallGameDialog from "../components/UninstallGameDialog.vue";
 import DetailPageSkeleton from "../components/DetailPageSkeleton.vue";
 import PlaytimeClockIcon from "../components/icons/PlaytimeClockIcon.vue";
@@ -779,9 +779,7 @@ async function confirmDelete() {
               ⚙
             </button>
             <GameConfigMenu
-              :is-favorite="game.isFavorite"
               :can-uninstall="canUninstall"
-              @toggle-favorite="library.toggleFavorite(game.id)"
               @properties="propertiesOpen = true"
               @uninstall="uninstallOpen = true"
             />
