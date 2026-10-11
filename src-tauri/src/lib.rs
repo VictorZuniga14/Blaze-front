@@ -5,6 +5,7 @@ mod process_manager;
 mod ra_identify;
 mod ra_status;
 mod emulator_data;
+mod eden_nsp_install;
 mod eden_config;
 mod runtime_install;
 
@@ -107,6 +108,15 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
+            // En dev el updater de Releases mataría el proceso: saltar directo a main.
+            #[cfg(debug_assertions)]
+            {
+                if let Some(updater) = app.get_webview_window("updater") {
+                    let _ = updater.close();
+                }
+                show_main_window(app.handle());
+            }
+
             let show_i =
                 MenuItem::with_id(app, "show", "Abrir Blaze", true, None::<&str>)?;
             let quit_i =
@@ -144,8 +154,14 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+                // Solo main va a bandeja; la ventana updater puede cerrarse.
+                if window.label() == "main" {
+                    let _ = window.hide();
+                    api.prevent_close();
+                } else if window.label() == "updater" {
+                    // Si el usuario cierra con la X antes del handoff JS, abrir Blaze.
+                    show_main_window(window.app_handle());
+                }
             }
         })
         .run(tauri::generate_context!())

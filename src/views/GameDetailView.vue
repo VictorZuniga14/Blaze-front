@@ -8,8 +8,9 @@ import DownloadProgressHud from "../components/DownloadProgressHud.vue";
 import AchievementsMedalIcon from "../components/icons/AchievementsMedalIcon.vue";
 import DownloadIcon from "../components/icons/DownloadIcon.vue";
 import FavoriteHeartIcon from "../components/icons/FavoriteHeartIcon.vue";
-import SettingsGearIcon from "../components/icons/SettingsGearIcon.vue";
+import GameConfigMenu from "../components/GameConfigMenu.vue";
 import GamePropertiesModal from "../components/GamePropertiesModal.vue";
+import UninstallGameDialog from "../components/UninstallGameDialog.vue";
 import DetailPageSkeleton from "../components/DetailPageSkeleton.vue";
 import PlaytimeClockIcon from "../components/icons/PlaytimeClockIcon.vue";
 import RaAchievementsShowcase from "../components/RaAchievementsShowcase.vue";
@@ -111,6 +112,8 @@ const r2SelectedKey = ref<string | null>(null);
 const r2SuggestCover = ref<((key: string) => string | null) | null>(null);
 const needsCloudRepair = ref(false);
 const propertiesOpen = ref(false);
+const uninstallOpen = ref(false);
+const uninstallBusy = ref(false);
 const downloadJob = computed(() => catalogDownloads.jobFor(gameId.value));
 const repairingFromCloud = computed(() =>
   catalogDownloads.isActive(gameId.value),
@@ -265,6 +268,45 @@ function restoreFromCatalog() {
   catalogDownloads.startDownload(gameId.value, {
     gameTitle: game.value?.title ?? null,
   });
+}
+
+const canUninstall = computed(() => {
+  if (repairingFromCloud.value || uninstallBusy.value) return false;
+  if (content.value?.path?.trim()) return true;
+  if (
+    currentConfig.value?.type === "runtime" &&
+    currentConfig.value.contentPath?.trim()
+  ) {
+    return true;
+  }
+  return false;
+});
+
+async function confirmUninstall(): Promise<void> {
+  if (!gameId.value || !canUninstall.value) return;
+  uninstallBusy.value = true;
+  pageError.value = null;
+  contentInfo.value = null;
+  try {
+    await gameContent.uninstallLocalFiles(gameId.value);
+    await Promise.all([
+      launch.loadConfig(gameId.value),
+      gameContent.loadContent(gameId.value),
+    ]);
+    if (game.value?.catalogRemoteId) {
+      needsCloudRepair.value = true;
+    } else {
+      needsCloudRepair.value = false;
+    }
+    uninstallOpen.value = false;
+    contentInfo.value =
+      "Juego desinstalado. Sigue en tu biblioteca; podés instalarlo de nuevo cuando quieras.";
+  } catch (err) {
+    pageError.value =
+      err instanceof Error ? err.message : "No se pudo desinstalar el juego.";
+  } finally {
+    uninstallBusy.value = false;
+  }
 }
 
 async function onDownloadJobSettled(
@@ -636,7 +678,7 @@ async function confirmDelete() {
               @click="restoreFromCatalog"
             >
               <DownloadIcon class="btn-download__icon" />
-              {{ content ? "Descargar de nuevo" : "Descargar" }}
+              INSTALAR
             </button>
             <button
               v-else
@@ -736,14 +778,13 @@ async function confirmDelete() {
             >
               ⚙
             </button>
-            <button
-              type="button"
-              class="tool-btn"
-              title="Propiedades"
-              @click="propertiesOpen = true"
-            >
-              <SettingsGearIcon />
-            </button>
+            <GameConfigMenu
+              :is-favorite="game.isFavorite"
+              :can-uninstall="canUninstall"
+              @toggle-favorite="library.toggleFavorite(game.id)"
+              @properties="propertiesOpen = true"
+              @uninstall="uninstallOpen = true"
+            />
             <button
               type="button"
               class="tool-btn"
@@ -1028,6 +1069,14 @@ async function confirmDelete() {
       :game="game"
       @close="propertiesOpen = false"
       @updated="void ensureLoaded()"
+    />
+
+    <UninstallGameDialog
+      :open="uninstallOpen"
+      :game-title="game?.title ?? 'este juego'"
+      :busy="uninstallBusy"
+      @cancel="uninstallOpen = false"
+      @confirm="confirmUninstall"
     />
 
     <ConfirmDialog

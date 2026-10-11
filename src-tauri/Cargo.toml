@@ -34,6 +34,7 @@ futures-util = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 hex = "0.4"
+nsz-rs = { version = "0.3", default-features = false }
 sevenz-rust2 = "0.23.0"
 windows-sys = { version = "0.59", features = [
   "Win32_Storage_FileSystem",

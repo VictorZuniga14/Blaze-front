@@ -5,6 +5,7 @@ import {
   catalogGamesDir,
   downloadFile,
   extractCatalogZip,
+  formatBytes,
   installEdenTitleNsps,
   joinPath,
   listenTransferProgress,
@@ -243,16 +244,35 @@ export const catalogInstallService = {
       await downloadCatalogPayload(catalog, onProgress);
 
     if (installPaths.length > 0) {
-      onProgress?.({
-        phase: "installing",
-        bytesDone: 0,
-        bytesTotal: 0,
-        message: `Instalando ${installPaths.length} update/DLC en Eden…`,
-      });
+      const installTransferId = crypto.randomUUID();
+      const unlistenInstall = await listenTransferProgress(
+        installTransferId,
+        (p) => {
+          onProgress?.({
+            phase: "installing",
+            bytesDone: p.bytesDone,
+            bytesTotal: p.bytesTotal,
+            message:
+              p.bytesTotal > 0
+                ? `Instalando update/DLC en Eden… (${formatBytes(p.bytesDone)} / ${formatBytes(p.bytesTotal)})`
+                : `Instalando ${installPaths.length} update/DLC en Eden…`,
+          });
+        },
+      );
       try {
-        await installEdenTitleNsps(runtime.executablePath, installPaths);
-      } catch (e) {
-        console.warn("[catalog] Eden install update/DLC:", e);
+        onProgress?.({
+          phase: "installing",
+          bytesDone: 0,
+          bytesTotal: 0,
+          message: `Instalando ${installPaths.length} update/DLC en Eden…`,
+        });
+        await installEdenTitleNsps(
+          runtime.executablePath,
+          installPaths,
+          installTransferId,
+        );
+      } finally {
+        unlistenInstall();
       }
     }
 

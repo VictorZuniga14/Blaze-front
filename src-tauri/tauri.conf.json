@@ -12,10 +12,25 @@
   "app": {
     "windows": [
       {
+        "label": "updater",
+        "title": "Blaze",
+        "width": 460,
+        "height": 168,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": true,
+        "center": true,
+        "decorations": true,
+        "visible": true,
+        "backgroundColor": [32, 36, 42]
+      },
+      {
+        "label": "main",
         "title": "Blaze",
         "width": 1100,
         "height": 720,
         "decorations": false,
+        "visible": false,
         "backgroundColor": [11, 15, 20]
       }
     ],

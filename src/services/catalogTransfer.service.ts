@@ -76,14 +76,16 @@ export async function extractCatalogZip(
   return invoke<CatalogZipExtract>("extract_catalog_zip", { zipPath, destDir });
 }
 
-/** Instala NSP update/DLC en Eden (best-effort CLI + carpeta pending). */
+/** Instala NSP update/DLC en la User NAND de Eden. */
 export async function installEdenTitleNsps(
   edenExecutable: string,
   nspPaths: string[],
+  transferId?: string,
 ): Promise<string> {
   return invoke<string>("install_eden_title_nsps", {
     edenExecutable,
     nspPaths,
+    transferId: transferId ?? null,
   });
 }
 

@@ -138,4 +138,19 @@ export const launchConfigService = {
   async deleteByGameId(gameId: string): Promise<void> {
     await launchConfigRepository.deleteByGameId(gameId);
   },
+
+  /** Quita contentPath sin borrar el runtime (p. ej. tras desinstalar archivos). */
+  async clearContentPath(gameId: string): Promise<void> {
+    const existing = await launchConfigRepository.findByGameId(gameId);
+    if (!existing || existing.type !== "runtime") return;
+    await launchConfigRepository.update(gameId, {
+      type: existing.type,
+      executablePath: existing.executablePath,
+      runtimeId: existing.runtimeId,
+      contentPath: null,
+      workingDirectory: existing.workingDirectory,
+      arguments: existing.arguments,
+      updatedAt: new Date().toISOString(),
+    });
+  },
 };

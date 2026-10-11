@@ -7,7 +7,6 @@ import { useRaSessionSyncStore } from "./stores/raSessionSync";
 import { useCatalogDownloadStore } from "./stores/catalogDownload";
 import { initializeBlazeEmulators } from "./services/emulatorData.service";
 import { ensureDefaultRuntimes } from "./services/ensureRuntime.service";
-import { checkAndPromptAppUpdate } from "./services/appUpdater.service";
 import BlazeLoader from "./components/BlazeLoader.vue";
 import AppNav from "./components/AppNav.vue";
 import WindowChrome from "./components/WindowChrome.vue";
@@ -107,7 +106,6 @@ onMounted(() => {
     }
 
     phase.value = "ready";
-    void checkAndPromptAppUpdate();
   })();
 });
 

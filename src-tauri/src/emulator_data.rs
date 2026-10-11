@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tauri::{path::BaseDirectory, AppHandle, Manager};
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager};
 use zip::ZipArchive;
 
 pub const MANAGED_DATA_DIR: &str = "emulator-data";
@@ -26,7 +26,7 @@ const BIOS_MAX_BYTES: u64 = 8 * 1024 * 1024;
 const PCSX2_INI_SEED: &str = "\
 [UI]
 SetupWizardIncomplete=false
-StartFullscreen=false
+StartFullscreen=true
 ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1060,46 +1060,13 @@ pub async fn import_eden_firmware_zip(
         .map_err(|e| format!("Importación cancelada: {e}"))?
 }
 
-fn try_eden_install_one(eden_exe: &Path, nsp: &Path) -> Result<(), String> {
-    let nsp_s = nsp.to_string_lossy().to_string();
-    let cli = eden_exe
-        .parent()
-        .map(|d| d.join("eden-cli.exe"))
-        .filter(|p| p.is_file());
-
-    let mut attempts: Vec<(PathBuf, Vec<String>)> = Vec::new();
-    // Flags comunes en forks yuzu/Eden (si el build no los tiene, fallan y seguimos).
-    attempts.push((
-        eden_exe.to_path_buf(),
-        vec!["--install".into(), nsp_s.clone()],
-    ));
-    attempts.push((eden_exe.to_path_buf(), vec!["-i".into(), nsp_s.clone()]));
-    if let Some(cli) = cli {
-        attempts.push((cli.clone(), vec!["--install".into(), nsp_s.clone()]));
-        attempts.push((cli, vec!["-i".into(), nsp_s]));
-    }
-
-    let mut last_err = String::from("sin intento");
-    for (exe, args) in attempts {
-        match std::process::Command::new(&exe).args(&args).status() {
-            Ok(status) if status.success() => return Ok(()),
-            Ok(status) => {
-                last_err = format!("{} {:?} → exit {status}", exe.display(), args);
-            }
-            Err(e) => {
-                last_err = format!("{} {:?} → {e}", exe.display(), args);
-            }
-        }
-    }
-    Err(last_err)
-}
-
-/// Instala update/DLC (.nsp) en Eden (keys managed + portable sync). Best-effort por CLI.
+/// Instala update/DLC (.nsp) en la User NAND de Eden (portable + managed).
 #[tauri::command]
 pub async fn install_eden_title_nsps(
     app: AppHandle,
     eden_executable: String,
     nsp_paths: Vec<String>,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
     let app_data = app_data_dir(&app)?;
     let managed = managed_data_root(&app_data, "eden");
@@ -1111,71 +1078,88 @@ pub async fn install_eden_title_nsps(
         return Ok("Sin update/DLC para instalar.".into());
     }
 
+    let transfer_id = transfer_id.unwrap_or_default();
+    let app_for_progress = app.clone();
+
     tokio::task::spawn_blocking(move || {
         seed_eden_managed_layout(&managed).map_err(|e| format!("{e:?}"))?;
         ensure_eden_keys_for_launch(&managed).map_err(|e| format!("{e:?}"))?;
         ensure_eden_firmware_for_launch(&managed).map_err(|e| format!("{e:?}"))?;
-        sync_eden_portable_user(&exe, &managed).map_err(|e| format!("{e:?}"))?;
+        let user_dir = sync_eden_portable_user(&exe, &managed).map_err(|e| format!("{e:?}"))?;
 
-        let pending_dir = managed.join("pending-nsp");
-        fs::create_dir_all(&pending_dir).map_err(|e| e.to_string())?;
+        let keys_dir = eden_keys_dir(&managed);
+        let managed_nand = managed.join("nand");
+        let portable_nand = user_dir.join("nand");
+        fs::create_dir_all(&managed_nand).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&portable_nand).map_err(|e| e.to_string())?;
 
-        let mut ok = 0usize;
-        let mut fail = 0usize;
-        let mut notes: Vec<String> = Vec::new();
-
-        for raw in &nsp_paths {
+        let mut installed = 0usize;
+        for (idx, raw) in nsp_paths.iter().enumerate() {
             let src = PathBuf::from(raw);
             if !src.is_file() {
-                fail += 1;
-                notes.push(format!("faltante: {raw}"));
-                continue;
+                return Err(format!("No se encontró el NSP a instalar: {raw}"));
             }
-            let name = src
+            let label = src
                 .file_name()
-                .map(|n| n.to_os_string())
-                .unwrap_or_default();
-            let staged = pending_dir.join(&name);
-            if !staged.exists() {
-                fs::copy(&src, &staged).map_err(|e| {
-                    format!("No se pudo copiar {} a pending: {e}", src.display())
-                })?;
-            }
-            let marker = pending_dir.join(format!(
-                ".installed-{}",
-                name.to_string_lossy().replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|'], "_")
-            ));
-            if marker.is_file() {
-                ok += 1;
-                continue;
-            }
-            match try_eden_install_one(&exe, &staged) {
-                Ok(()) => {
-                    let _ = fs::write(&marker, b"ok");
-                    ok += 1;
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| raw.clone());
+            let mut on_progress = |p: crate::eden_nsp_install::InstallProgress| {
+                if transfer_id.is_empty() {
+                    return;
                 }
-                Err(e) => {
-                    fail += 1;
-                    notes.push(format!("{}: {e}", name.to_string_lossy()));
+                #[derive(Clone, Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct InstallTransferProgress {
+                    transfer_id: String,
+                    direction: String,
+                    bytes_done: u64,
+                    bytes_total: u64,
+                    message: String,
                 }
-            }
+                let _ = app_for_progress.emit(
+                    "catalog-transfer-progress",
+                    InstallTransferProgress {
+                        transfer_id: transfer_id.clone(),
+                        direction: "install".into(),
+                        bytes_done: p.bytes_done,
+                        bytes_total: p.bytes_total,
+                        message: p.message,
+                    },
+                );
+            };
+            on_progress(crate::eden_nsp_install::InstallProgress {
+                bytes_done: 0,
+                bytes_total: 0,
+                message: format!(
+                    "Instalando update/DLC {}/{}: {label}…",
+                    idx + 1,
+                    nsp_paths.len()
+                ),
+            });
+            crate::eden_nsp_install::install_nsp_to_user_nand(
+                &src,
+                &keys_dir,
+                &[&managed_nand, &portable_nand],
+                &mut on_progress,
+            )
+            .map_err(|e| format!("Falló instalar {label}: {e}"))?;
+            installed += 1;
         }
 
-        if ok == 0 && fail > 0 {
-            return Err(format!(
-                "Eden no aceptó instalar los NSP por CLI ({}). Quedaron en {} — abrí Eden → Archivo → Instalar archivos.",
-                notes.join(" | "),
-                pending_dir.display()
-            ));
+        // title.keys puede haber crecido: forzar copia a portable (sync missing-only no actualiza).
+        let title_keys_src = keys_dir.join("title.keys");
+        if title_keys_src.is_file() {
+            let title_keys_dst = user_dir.join("keys").join("title.keys");
+            if let Some(parent) = title_keys_dst.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            fs::copy(&title_keys_src, &title_keys_dst).map_err(|e| {
+                format!(
+                    "No se pudo sincronizar title.keys a portable: {e}"
+                )
+            })?;
         }
-        if fail > 0 {
-            return Ok(format!(
-                "Instalados {ok}; {fail} pendientes en {} (Eden → Archivo → Instalar archivos). {}",
-                pending_dir.display(),
-                notes.join(" | ")
-            ));
-        }
-        Ok(format!("Update/DLC instalados en Eden ({ok})."))
+        Ok(format!("Update/DLC instalados en Eden ({installed})."))
     })
     .await
     .map_err(|e| format!("Instalación cancelada: {e}"))?

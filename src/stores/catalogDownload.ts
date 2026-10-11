@@ -51,7 +51,8 @@ function progressToHud(p: CatalogInstallProgress): {
     percent = Math.min(100, Math.round((p.bytesDone / p.bytesTotal) * 100));
     detail = `${formatBytes(p.bytesDone)} / ${formatBytes(p.bytesTotal)}`;
   } else if (p.phase === "installing") {
-    percent = 100;
+    // Sin total aún: no fingir 100% (antes el CLI falso marcaba LISTO igual).
+    percent = 0;
     detail = p.message;
   }
 

@@ -65,6 +65,22 @@ export const useGameContentStore = defineStore("gameContent", () => {
     }
   }
 
+  async function uninstallLocalFiles(gameId: string): Promise<void> {
+    saving.value = true;
+    error.value = null;
+    try {
+      await gameContentService.uninstallLocalFiles(gameId);
+      content.value = null;
+      fileExists.value = false;
+    } catch (err) {
+      const message = userFacingError(err, "No se pudo desinstalar el juego.");
+      error.value = message;
+      throw new Error(message);
+    } finally {
+      saving.value = false;
+    }
+  }
+
   function clear(): void {
     content.value = null;
     fileExists.value = true;
@@ -82,6 +98,7 @@ export const useGameContentStore = defineStore("gameContent", () => {
     loadContent,
     associateContent,
     removeContent,
+    uninstallLocalFiles,
     clear,
   };
 });
