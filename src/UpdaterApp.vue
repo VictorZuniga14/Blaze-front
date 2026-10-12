@@ -18,6 +18,8 @@ const cancelled = ref(false);
 const busy = ref(true);
 let unlistenClose: (() => void) | undefined;
 let handingOff = false;
+/** Permite que close() del handoff no sea bloqueado por onCloseRequested. */
+let allowWindowClose = false;
 
 const canCancel = computed(
   () =>
@@ -46,6 +48,7 @@ async function handoffOnce(): Promise<void> {
   if (handingOff) return;
   handingOff = true;
   busy.value = false;
+  allowWindowClose = true;
   await handoffToMainWindow();
 }
 
@@ -65,6 +68,9 @@ onMounted(() => {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       unlistenClose = await getCurrentWindow().onCloseRequested(async (event) => {
+        // Cierre programático tras handoff: no bloquear.
+        if (allowWindowClose) return;
+
         if (
           progress.value.phase === "installing" ||
           progress.value.phase === "done"
@@ -72,11 +78,10 @@ onMounted(() => {
           event.preventDefault();
           return;
         }
-        if (!cancelled.value) {
-          cancelled.value = true;
-          event.preventDefault();
-          await handoffOnce();
-        }
+        // X del usuario: abrir main y cerrar updater (mismo handoff).
+        cancelled.value = true;
+        event.preventDefault();
+        await handoffOnce();
       });
     } catch {
       /* fuera de Tauri */
@@ -89,8 +94,10 @@ onMounted(() => {
       },
     });
 
+    // Sin update / error / cancel: cerrar modal y recién abrir la app.
+    // Con update instalado → relaunch (no handoff).
     if (result === "skipped") {
-      busy.value = false;
+      await handoffOnce();
     }
   })();
 });

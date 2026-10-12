@@ -159,15 +159,22 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Solo main va a bandeja; la ventana updater puede cerrarse.
-                if window.label() == "main" {
-                    let _ = window.hide();
-                    api.prevent_close();
-                } else if window.label() == "updater" {
-                    // Si el usuario cierra con la X antes del handoff JS, abrir Blaze.
-                    show_main_window(window.app_handle());
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Solo main va a bandeja. El updater lo cierra el JS tras el check
+                    // (o con X → handoff); no abrir main aquí o aparecen dos ventanas.
+                    if window.label() == "main" {
+                        let _ = window.hide();
+                        api.prevent_close();
+                    }
                 }
+                tauri::WindowEvent::Destroyed => {
+                    // Red de seguridad: si el modal updater muere sin handoff JS, abrir app.
+                    if window.label() == "updater" {
+                        show_main_window(window.app_handle());
+                    }
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

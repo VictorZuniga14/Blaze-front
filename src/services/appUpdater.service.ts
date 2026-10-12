@@ -26,8 +26,21 @@ function emit(
   onProgress?.(progress);
 }
 
-/** Muestra la ventana principal y cierra la de actualización. */
+/**
+ * Cierra el modal de actualización y recién después muestra la app.
+ * Orden fijo: updater off → main on (nunca las dos a la vez).
+ * El caller debe armar el flag que permite close() (ver UpdaterApp).
+ */
 export async function handoffToMainWindow(): Promise<void> {
+  try {
+    const current = getCurrentWindow();
+    if (current.label === "updater") {
+      await current.close();
+    }
+  } catch {
+    /* ya cerrada */
+  }
+
   try {
     const main = await WebviewWindow.getByLabel("main");
     if (main) {
@@ -38,20 +51,12 @@ export async function handoffToMainWindow(): Promise<void> {
   } catch (error) {
     console.info("[Blaze] No se pudo mostrar main:", error);
   }
-  try {
-    const current = getCurrentWindow();
-    if (current.label === "updater") {
-      await current.close();
-    }
-  } catch {
-    /* ya cerrada */
-  }
 }
 
 /**
  * Flujo de la ventana externa: busca update, descarga con progreso e instala.
- * Sin update / error de red / cancel → handoff a main.
- * Con update instalado → relaunch (no abre main).
+ * Sin update / error de red / cancel → `"skipped"` (el UI hace handoff a main).
+ * Con update instalado → relaunch (no abre main aquí).
  */
 export async function runExternalUpdaterFlow(
   options: RunUpdaterOptions = {},
@@ -60,7 +65,6 @@ export async function runExternalUpdaterFlow(
 
   if (import.meta.env.DEV) {
     console.info("[Blaze] Update check omitido (modo dev)");
-    await handoffToMainWindow();
     return "skipped";
   }
 
@@ -74,28 +78,27 @@ export async function runExternalUpdaterFlow(
 
   let update: Update | null = null;
   try {
-    update = await check();
+    // Sin tope, `check()` puede colgarse minutos si GitHub/latest.json no responde.
+    update = await Promise.race([
+      check(),
+      new Promise<null>((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error("Timeout buscando actualizaciones")),
+          12_000,
+        );
+      }),
+    ]);
   } catch (error) {
     console.info("[Blaze] Update check omitido:", error);
-    await handoffToMainWindow();
     return "skipped";
   }
 
   if (!update) {
-    emit(onProgress, {
-      phase: "idle",
-      percent: 100,
-      downloadedBytes: 0,
-      totalBytes: null,
-      detail: "Blaze está al día",
-    });
-    await handoffToMainWindow();
     return "skipped";
   }
 
   if (shouldAbort?.()) {
     await update.close();
-    await handoffToMainWindow();
     return "skipped";
   }
 
@@ -159,7 +162,6 @@ export async function runExternalUpdaterFlow(
     });
   } catch (error) {
     if (shouldAbort?.()) {
-      await handoffToMainWindow();
       return "skipped";
     }
     console.info("[Blaze] Falló la actualización:", error);
@@ -168,12 +170,10 @@ export async function runExternalUpdaterFlow(
     } catch {
       /* recurso ya liberado */
     }
-    await handoffToMainWindow();
     return "skipped";
   }
 
   if (shouldAbort?.()) {
-    await handoffToMainWindow();
     return "skipped";
   }
 
