@@ -14,10 +14,21 @@ import {
 } from "../services/ra/adapterKind";
 import {
   hasRetroArchCoreFlag,
-  missingRetroArchCoreMessage,
+  pickFirstExistingCore,
   retroArchCoreArgs,
+  retroArchCoreDllOrder,
   retroArchCorePathCandidates,
 } from "./retroArchCores";
+import {
+  CoreMissingError,
+  Ps1BiosRecommended,
+} from "../services/ensureRuntimeErrors";
+import { RA_CONSOLE_LABELS } from "./raConsoles";
+
+export type ResolveRetroArchLaunchResult = {
+  arguments: string[];
+  warning: Ps1BiosRecommended | null;
+};
 
 async function pathExists(path: string): Promise<boolean> {
   return invoke<boolean>("path_check", { path, kind: "file" });
@@ -88,27 +99,58 @@ export function describeRuntimeChoice(runtime: Runtime): string {
 /**
  * Args de core RetroArch (`-L …`) según plataforma.
  * Si `existingArgs` ya traen `-L`, se respetan.
- * PCSX2 / sin mapping → `[]`.
+ * PCSX2 / sin mapping → `{ arguments: existing, warning: null }`.
+ * Si el core elegido es SwanStation sin BIOS PS1 → `Ps1BiosRecommended` (no bloquea).
  */
 export async function resolveRetroArchLaunchArguments(
   runtime: Runtime,
   platform: string | null | undefined,
   existingArgs: readonly string[] = [],
-): Promise<string[]> {
-  if (!isRetroArchRuntime(runtime)) return [...existingArgs];
-  if (hasRetroArchCoreFlag(existingArgs)) return [...existingArgs];
+): Promise<ResolveRetroArchLaunchResult> {
+  if (!isRetroArchRuntime(runtime)) {
+    return { arguments: [...existingArgs], warning: null };
+  }
+  if (hasRetroArchCoreFlag(existingArgs)) {
+    return { arguments: [...existingArgs], warning: null };
+  }
 
+  let hasPs1Bios = false;
+  let coreOptions: { ps1HasExternalBios?: boolean } | undefined;
+  const consoleKey = platformToRaConsoleKey(platform);
+  if (consoleKey === "ps1") {
+    hasPs1Bios = await invoke<boolean>("retroarch_ps1_bios_present");
+    coreOptions = { ps1HasExternalBios: hasPs1Bios };
+  }
+
+  const dllOrder = retroArchCoreDllOrder(platform, coreOptions);
   const candidates = retroArchCorePathCandidates(
     runtime.executablePath,
     platform,
+    coreOptions,
   );
-  if (candidates.length === 0) return [...existingArgs];
-
-  for (const corePath of candidates) {
-    if (await pathExists(corePath)) {
-      return [...retroArchCoreArgs(corePath), ...existingArgs];
-    }
+  if (candidates.length === 0) {
+    return { arguments: [...existingArgs], warning: null };
   }
 
-  throw new Error(missingRetroArchCoreMessage(platform));
+  const chosen = await pickFirstExistingCore(candidates, pathExists);
+  if (chosen) {
+    const dll = chosen.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+    const warning =
+      consoleKey === "ps1" &&
+      !hasPs1Bios &&
+      dll === "swanstation_libretro.dll"
+        ? new Ps1BiosRecommended()
+        : null;
+    return {
+      arguments: [...retroArchCoreArgs(chosen), ...existingArgs],
+      warning,
+    };
+  }
+
+  const preferred = dllOrder[0] ?? "core";
+  const label =
+    (consoleKey && RA_CONSOLE_LABELS[consoleKey]) ||
+    platform ||
+    "esta plataforma";
+  throw new CoreMissingError(preferred, String(label));
 }

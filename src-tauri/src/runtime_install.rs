@@ -7,8 +7,10 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Mutex as AsyncMutex;
 use std::time::Duration;
 use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager};
@@ -138,6 +140,9 @@ pub struct InstalledMarker {
     /// Sha256 del ejecutable principal tras instalar. Opcional al leer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exe_sha256: Option<String>,
+    /// DLLs de cores extraídas (RetroArch). Opcional al leer (marcadores viejos).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cores: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -286,6 +291,29 @@ fn clear_cancel(operation_id: &str) {
     }
 }
 
+fn runtime_install_coalescing_key(runtime_id: &str, version: &str) -> String {
+    format!("{runtime_id}:{version}")
+}
+
+fn runtime_install_locks(
+) -> &'static Mutex<HashMap<String, Arc<AsyncMutex<()>>>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+async fn acquire_runtime_install_lock(runtime_id: &str, version: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    let key = runtime_install_coalescing_key(runtime_id, version);
+    let lock = {
+        let mut map = runtime_install_locks()
+            .lock()
+            .expect("runtime install locks poisoned");
+        map.entry(key)
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
+    };
+    lock.lock_owned().await
+}
+
 fn check_cancel(flag: &AtomicBool) -> Result<(), InstallError> {
     if flag.load(Ordering::SeqCst) {
         Err(InstallError::Cancelled)
@@ -386,6 +414,55 @@ fn cores_present(version_root: &Path, cores: &[String]) -> bool {
     })
 }
 
+/// Cores del manifiesto que no están en `cores/` de la versión instalada.
+pub fn missing_manifest_cores(root: &Path, entry: &RuntimeManifestEntry) -> Vec<String> {
+    if entry.cores.is_empty() {
+        return Vec::new();
+    }
+    let dir = version_dir(root, &entry.id, &entry.version);
+    let cores = cores_dir(&dir);
+    entry
+        .cores
+        .iter()
+        .filter(|dll| {
+            let path = cores.join(dll);
+            !(path.is_file() && file_has_mz_signature(&path))
+        })
+        .cloned()
+        .collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCoresStatus {
+    pub id: String,
+    pub version: String,
+    pub status: String,
+    pub missing_cores: Vec<String>,
+}
+
+/// Compara cores del manifiesto vs instalación managed (solo detección).
+#[tauri::command]
+pub fn runtime_cores_status(
+    app: AppHandle,
+    id: String,
+) -> Result<RuntimeCoresStatus, String> {
+    let entry = lookup_manifest(&id).map_err(|e| e.to_user())?;
+    let root = runtimes_root(&app).map_err(|e| e.to_user())?;
+    let missing = missing_manifest_cores(&root, entry);
+    let status = if missing.is_empty() {
+        "ok".to_string()
+    } else {
+        "cores_outdated".to_string()
+    };
+    Ok(RuntimeCoresStatus {
+        id: entry.id.clone(),
+        version: entry.version.clone(),
+        status,
+        missing_cores: missing,
+    })
+}
+
 fn resolve_resource_path(app: &AppHandle, relative: &str) -> Option<PathBuf> {
     if let Ok(path) = app.path().resolve(relative, BaseDirectory::Resource) {
         if path.exists() {
@@ -476,6 +553,8 @@ fn copy_tree_overwrite(source: &Path, destination: &Path) -> Result<(), InstallE
 #[derive(Debug, Deserialize)]
 struct BundleMeta {
     version: String,
+    /// Sha del `.7z` local (puede diferir del manifiesto remoto). Se deserializa del JSON.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     sha256: String,
 }
 
@@ -518,6 +597,11 @@ fn finalize_bundled_install(
     }
 
     let exe_sha256 = sha256_file(&exe_path)?;
+    let cores = if entry.cores.is_empty() {
+        None
+    } else {
+        Some(entry.cores.clone())
+    };
     let marker = InstalledMarker {
         id: entry.id.clone(),
         version: entry.version.clone(),
@@ -525,6 +609,7 @@ fn finalize_bundled_install(
         source: Some(InstallSource::Bundle),
         archive_sha256,
         exe_sha256: Some(exe_sha256),
+        cores,
     };
     let marker_raw =
         serde_json::to_string_pretty(&marker).map_err(|e| InstallError::Io(e.to_string()))?;
@@ -1361,6 +1446,19 @@ pub async fn install_runtime_into(
         });
     }
 
+    let _install_coalesce =
+        acquire_runtime_install_lock(&entry.id, &entry.version).await;
+
+    if is_version_installed(root, entry) {
+        let dir = version_dir(root, &entry.id, &entry.version);
+        return Ok(InstalledRuntimeInfo {
+            id: entry.id.clone(),
+            version: entry.version.clone(),
+            executable_path: dir.join(&entry.exe).to_string_lossy().to_string(),
+            root_path: dir.to_string_lossy().to_string(),
+        });
+    }
+
     if let Some(bundled) = try_install_from_bundle(app, root, entry, operation_id)? {
         return Ok(bundled);
     }
@@ -1468,6 +1566,11 @@ pub async fn install_runtime_into(
         }
 
         let exe_sha256 = sha256_file(&exe_path)?;
+        let cores = if entry.cores.is_empty() {
+            None
+        } else {
+            Some(entry.cores.clone())
+        };
         let marker = InstalledMarker {
             id: entry.id.clone(),
             version: entry.version.clone(),
@@ -1475,6 +1578,7 @@ pub async fn install_runtime_into(
             source: Some(InstallSource::Download),
             archive_sha256: Some(archive_sha256),
             exe_sha256: Some(exe_sha256),
+            cores,
         };
         let marker_raw = serde_json::to_string_pretty(&marker)
             .map_err(|e| InstallError::Io(e.to_string()))?;
@@ -1690,6 +1794,7 @@ mod tests {
             source: Some(InstallSource::Download),
             archive_sha256: Some("aa".into()),
             exe_sha256: Some("bb".into()),
+            cores: None,
         };
         fs::write(
             marker_path(&dir),
@@ -1734,6 +1839,72 @@ mod tests {
     }
 
     #[test]
+    fn missing_manifest_cores_detects_absent_dll() {
+        let root = temp_root("cores-missing");
+        let entry = lookup_manifest("retroarch").unwrap();
+        let dir = version_dir(&root, &entry.id, &entry.version);
+        fs::create_dir_all(cores_dir(&dir)).unwrap();
+        fs::write(dir.join(&entry.exe), b"MZ\0\0fake").unwrap();
+        // Solo swanstation presente; pcsx_rearmed (y otros) faltan.
+        let swan = cores_dir(&dir).join("swanstation_libretro.dll");
+        fs::write(&swan, b"MZ\0\0dll").unwrap();
+        let marker = InstalledMarker {
+            id: entry.id.clone(),
+            version: entry.version.clone(),
+            sha256: entry.sha256.clone(),
+            source: Some(InstallSource::Download),
+            archive_sha256: None,
+            exe_sha256: None,
+            cores: Some(vec!["swanstation_libretro.dll".into()]),
+        };
+        fs::write(marker_path(&dir), serde_json::to_string(&marker).unwrap()).unwrap();
+        let missing = missing_manifest_cores(root.as_path(), entry);
+        assert!(
+            missing.iter().any(|d| d == "pcsx_rearmed_libretro.dll"),
+            "missing={missing:?}"
+        );
+        assert!(!missing.iter().any(|d| d == "swanstation_libretro.dll"));
+    }
+
+    #[test]
+    fn missing_manifest_cores_ignores_old_marker_without_cores_field() {
+        let root = temp_root("cores-old-marker");
+        let entry = lookup_manifest("retroarch").unwrap();
+        let dir = version_dir(&root, &entry.id, &entry.version);
+        fs::create_dir_all(cores_dir(&dir)).unwrap();
+        fs::write(dir.join(&entry.exe), b"MZ\0\0fake").unwrap();
+        // Marcador legado sin `cores`; todos los DLL del manifiesto en disco.
+        for dll in &entry.cores {
+            fs::write(cores_dir(&dir).join(dll), b"MZ\0\0dll").unwrap();
+        }
+        let legacy = format!(
+            r#"{{"id":"{}","version":"{}","sha256":"{}"}}"#,
+            entry.id, entry.version, entry.sha256
+        );
+        fs::write(marker_path(&dir), legacy).unwrap();
+        let missing = missing_manifest_cores(root.as_path(), entry);
+        assert!(
+            missing.is_empty(),
+            "no debe ser cores_outdated si los DLL están en disco; missing={missing:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_install_lock_serializes_concurrent_waiters() {
+        let entry = lookup_manifest("pcsx2").unwrap();
+        let g1 = acquire_runtime_install_lock("pcsx2", &entry.version).await;
+        let version = entry.version.clone();
+        let j = tokio::spawn(async move {
+            let _g2 = acquire_runtime_install_lock("pcsx2", &version).await;
+            1u8
+        });
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(!j.is_finished());
+        drop(g1);
+        assert_eq!(j.await.unwrap(), 1);
+    }
+
+    #[test]
     #[cfg(debug_assertions)]
     fn debug_allows_bundle_for_pcsx2_and_retroarch() {
         assert!(bundle_install_allowed("pcsx2"));
@@ -1760,6 +1931,7 @@ mod tests {
             source: Some(InstallSource::Download),
             archive_sha256: Some(archive_sha.clone()),
             exe_sha256: Some(exe_sha.clone()),
+            cores: Some(vec!["swanstation_libretro.dll".into()]),
         };
         let raw = serde_json::to_string_pretty(&marker).unwrap();
         fs::write(marker_path(&dir), &raw).unwrap();

@@ -7,15 +7,71 @@ import {
   parentDir,
   retroArchCoreArgs,
   retroArchCoreCandidatesForPlatform,
+  pickFirstExistingCore,
+  retroArchCoreDllOrder,
   retroArchCorePathCandidates,
 } from "../src/utils/retroArchCores";
+import { CoreMissingError } from "../src/services/ensureRuntimeErrors";
 
 describe("retroArchCores", () => {
-  it("PS1 → SwanStation primero", () => {
+  it("PS1 → SwanStation primero por defecto", () => {
     const r = retroArchCoreCandidatesForPlatform("PlayStation");
     assert.ok(r);
     assert.equal(r.key, "ps1");
     assert.equal(r.dlls[0], "swanstation_libretro.dll");
+  });
+
+  it("PS1 sin BIOS externa → pcsx_rearmed (HLE) primero", () => {
+    const order = retroArchCoreDllOrder("PlayStation", { ps1HasExternalBios: false });
+    assert.equal(order[0], "pcsx_rearmed_libretro.dll");
+  });
+
+  it("PS1 con BIOS en system → SwanStation primero", () => {
+    const order = retroArchCoreDllOrder("PlayStation", { ps1HasExternalBios: true });
+    assert.equal(order[0], "swanstation_libretro.dll");
+  });
+
+  it("instalación vieja sin pcsx_rearmed y sin BIOS → cae a swanstation si existe", async () => {
+    const order = retroArchCoreDllOrder("PlayStation", { ps1HasExternalBios: false });
+    assert.equal(order[0], "pcsx_rearmed_libretro.dll");
+    const paths = order.map(
+      (dll) => `C:\\runtimes\\retroarch\\1.22.2\\cores\\${dll}`,
+    );
+    const chosen = await pickFirstExistingCore(paths, async (p) =>
+      p.endsWith("swanstation_libretro.dll"),
+    );
+    assert.ok(chosen?.endsWith("swanstation_libretro.dll"));
+  });
+
+  it("sin ningún core PS1 → CoreMissing nombra la DLL preferida", async () => {
+    const order = retroArchCoreDllOrder("PlayStation", { ps1HasExternalBios: false });
+    const paths = order.map(
+      (dll) => `C:\\runtimes\\retroarch\\1.22.2\\cores\\${dll}`,
+    );
+    const chosen = await pickFirstExistingCore(paths, async () => false);
+    assert.equal(chosen, null);
+    const err = new CoreMissingError(order[0]!, "PlayStation");
+    assert.equal(err.code, "core_missing");
+    assert.equal(err.dll, "pcsx_rearmed_libretro.dll");
+    assert.ok(err.message.includes("pcsx_rearmed_libretro.dll"));
+  });
+
+  it("con BIOS y ambos cores → SwanStation", async () => {
+    const order = retroArchCoreDllOrder("PlayStation", { ps1HasExternalBios: true });
+    const paths = order.map(
+      (dll) => `C:\\runtimes\\retroarch\\1.22.2\\cores\\${dll}`,
+    );
+    const chosen = await pickFirstExistingCore(paths, async () => true);
+    assert.ok(chosen?.endsWith("swanstation_libretro.dll"));
+  });
+
+  it("SwanStation sin BIOS → Ps1BiosRecommended (no bloquea)", async () => {
+    const { Ps1BiosRecommended } = await import(
+      "../src/services/ensureRuntimeErrors"
+    );
+    const warn = new Ps1BiosRecommended();
+    assert.equal(warn.code, "ps1_bios_recommended");
+    assert.ok(warn.message.toLowerCase().includes("swanstation") || warn.message.includes("BIOS"));
   });
 
   it("NES / SNES usan cores que ya tenés en Blaze", () => {

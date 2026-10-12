@@ -21,7 +21,10 @@ export const launchService = {
     return invoke<ActiveProcess>("get_active_process");
   },
 
-  async launchGame(gameId: string): Promise<ActiveProcess> {
+  async launchGame(
+    gameId: string,
+    options?: { onSoftWarning?: (message: string) => void },
+  ): Promise<{ active: ActiveProcess; softWarning: string | null }> {
     const config = await launchConfigService.getByGameId(gameId);
     if (!config) {
       throw new Error("No hay una configuración de ejecución para este juego.");
@@ -30,6 +33,7 @@ export const launchService = {
     let executablePath: string | null = null;
     let argumentsForLaunch = [...config.arguments];
     let workingDirectory = config.workingDirectory;
+    let softWarning: string | null = null;
 
     if (config.type === "native") {
       executablePath = config.executablePath;
@@ -62,11 +66,12 @@ export const launchService = {
       }
 
       const game = await gameRepository.findById(gameId);
-      const resolvedArgs = await resolveRetroArchLaunchArguments(
+      const resolved = await resolveRetroArchLaunchArguments(
         runtime,
         game?.platform,
         config.arguments,
       );
+      const resolvedArgs = resolved.arguments;
       // Persistir core si el launch_config venía sin `-L` (p. ej. installs viejos).
       if (
         resolvedArgs.length !== config.arguments.length ||
@@ -114,6 +119,7 @@ export const launchService = {
         throw new Error(launchPlan.error);
       }
       argumentsForLaunch = launchPlan.arguments;
+      softWarning = resolved.warning?.message ?? null;
     } else {
       throw new Error("Tipo de configuración de ejecución no soportado.");
     }
@@ -122,12 +128,20 @@ export const launchService = {
       throw new Error("No se pudo resolver el ejecutable.");
     }
 
-    return invoke<ActiveProcess>("launch_native", {
+    // Aviso tipado (Ps1BiosRecommended) antes de spawn — no bloquea.
+    if (softWarning) {
+      options?.onSoftWarning?.(softWarning);
+      // Dejar que Vue pinte el aviso antes de crear el proceso.
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    const active = await invoke<ActiveProcess>("launch_native", {
       gameId: config.gameId,
       executablePath,
       workingDirectory,
       arguments: argumentsForLaunch,
     });
+    return { active, softWarning };
   },
 
   async onProcessExited(

@@ -1,9 +1,12 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import {
   catalogInstallService,
+  CatalogInstallNeedsPcsx2BiosError,
   type CatalogInstallProgress,
 } from "../services/catalogInstall.service";
+import { EnsureRuntimeError } from "../services/ensureRuntimeErrors";
 import { formatBytes } from "../services/catalogTransfer.service";
 import { useLibraryStore } from "./library";
 
@@ -11,6 +14,7 @@ export type CatalogDownloadStatus =
   | "queued"
   | "downloading"
   | "installing"
+  | "waiting_bios"
   | "done"
   | "error";
 
@@ -23,6 +27,7 @@ export type CatalogDownloadJob = {
   detail: string | null;
   message: string;
   error: string | null;
+  runtimeOperationId: string | null;
   updatedAt: number;
 };
 
@@ -34,7 +39,13 @@ function progressToHud(p: CatalogInstallProgress): {
 } {
   let status: CatalogDownloadStatus = "downloading";
   let hudTitle = "PREPARANDO";
-  if (p.phase === "downloading") {
+  if (p.phase === "preparing_runtime") {
+    status = "downloading";
+    hudTitle = "PREPARANDO EMULADOR";
+  } else if (p.phase === "waiting_bios") {
+    status = "waiting_bios";
+    hudTitle = "BIOS PS2";
+  } else if (p.phase === "downloading") {
     status = "downloading";
     hudTitle = "DESCARGANDO";
   } else if (p.phase === "installing") {
@@ -70,7 +81,8 @@ export const useCatalogDownloadStore = defineStore("catalogDownload", () => {
       (j) =>
         j.status === "queued" ||
         j.status === "downloading" ||
-        j.status === "installing",
+        j.status === "installing" ||
+        j.status === "waiting_bios",
     ),
   );
 
@@ -95,8 +107,20 @@ export const useCatalogDownloadStore = defineStore("catalogDownload", () => {
     return (
       job.status === "queued" ||
       job.status === "downloading" ||
-      job.status === "installing"
+      job.status === "installing" ||
+      job.status === "waiting_bios"
     );
+  }
+
+  async function cancelRuntimeInstall(gameId: string): Promise<void> {
+    const job = jobFor(gameId);
+    const op = job?.runtimeOperationId?.trim();
+    if (!op) return;
+    try {
+      await invoke("cancel_runtime_install", { operationId: op });
+    } catch {
+      /* best-effort */
+    }
   }
 
   function patchJob(gameId: string, patch: Partial<CatalogDownloadJob>): void {
@@ -135,6 +159,7 @@ export const useCatalogDownloadStore = defineStore("catalogDownload", () => {
               detail: hud.detail,
               message: p.message,
               error: null,
+              runtimeOperationId: p.runtimeOperationId ?? null,
             });
           });
           patchJob(gameId, {
@@ -151,12 +176,27 @@ export const useCatalogDownloadStore = defineStore("catalogDownload", () => {
             /* la ficha ya está; el listado se refresca al volver */
           }
         } catch (err) {
+          if (err instanceof CatalogInstallNeedsPcsx2BiosError) {
+            patchJob(gameId, {
+              status: "waiting_bios",
+              hudTitle: "BIOS PS2",
+              percent: 0,
+              detail: null,
+              message: err.message,
+              error: null,
+            });
+            queue.value = queue.value.filter((id) => id !== gameId);
+            runningGameId.value = null;
+            continue;
+          }
           const raw =
-            err instanceof Error
+            err instanceof EnsureRuntimeError
               ? err.message
-              : typeof err === "string"
-                ? err
-                : null;
+              : err instanceof Error
+                ? err.message
+                : typeof err === "string"
+                  ? err
+                  : null;
           patchJob(gameId, {
             status: "error",
             hudTitle: "ERROR",
@@ -166,8 +206,10 @@ export const useCatalogDownloadStore = defineStore("catalogDownload", () => {
             error: raw?.trim() || "No se pudo descargar el juego.",
           });
         } finally {
-          queue.value = queue.value.filter((id) => id !== gameId);
-          runningGameId.value = null;
+          if (jobs.value[gameId]?.status !== "waiting_bios") {
+            queue.value = queue.value.filter((id) => id !== gameId);
+            runningGameId.value = null;
+          }
         }
       }
     } finally {
@@ -198,9 +240,27 @@ export const useCatalogDownloadStore = defineStore("catalogDownload", () => {
         detail: null,
         message: "En cola…",
         error: null,
+        runtimeOperationId: null,
         updatedAt: Date.now(),
       },
     };
+    if (!queue.value.includes(id)) {
+      queue.value = [...queue.value, id];
+    }
+    void pump();
+  }
+
+  /** Reanuda la descarga tras importar BIOS PS2 (mismo gameId en waiting_bios). */
+  function resumeAfterPcsx2Bios(gameId: string): void {
+    const id = gameId.trim();
+    const job = jobs.value[id];
+    if (!job || job.status !== "waiting_bios") return;
+    patchJob(id, {
+      status: "queued",
+      hudTitle: "EN COLA",
+      message: "Reanudando descarga…",
+      error: null,
+    });
     if (!queue.value.includes(id)) {
       queue.value = [...queue.value, id];
     }
@@ -223,6 +283,8 @@ export const useCatalogDownloadStore = defineStore("catalogDownload", () => {
     jobFor,
     isActive,
     startDownload,
+    resumeAfterPcsx2Bios,
+    cancelRuntimeInstall,
     clearJob,
   };
 });

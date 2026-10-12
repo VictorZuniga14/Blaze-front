@@ -708,6 +708,163 @@ pub fn prepare_runtime_launch(
     }
 }
 
+/// Tamaño típico de BIOS PS1 (512 KiB). Sin hashes de dumps conocidos.
+pub const PS1_BIOS_EXACT_BYTES: u64 = 524_288;
+
+/// PS1 BIOS en `emulator-data/retroarch/system`: nombre `scph*.bin` (case-insensitive)
+/// y tamaño exacto 524288 bytes. No usa hashes de BIOS conocidas.
+pub fn find_valid_ps1_bios_in_system(system_dir: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(system_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        let name = path.file_name()?.to_string_lossy();
+        let lower = name.to_ascii_lowercase();
+        if !(lower.starts_with("scph") && lower.ends_with(".bin")) {
+            continue;
+        }
+        let len = fs::metadata(&path).ok()?.len();
+        if len == PS1_BIOS_EXACT_BYTES {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Basename seguro para import: sin separadores ni `..`.
+pub fn sanitize_bios_file_name(raw: &str) -> Option<String> {
+    let base = Path::new(raw)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .trim();
+    if base.is_empty() || base == "." || base == ".." {
+        return None;
+    }
+    if base.contains('/') || base.contains('\\') || base.contains('\0') {
+        return None;
+    }
+    Some(base.to_string())
+}
+
+fn path_is_regular_file_not_symlink(path: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    meta.file_type().is_file() && !meta.file_type().is_symlink()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPcsx2BiosResult {
+    pub dest_path: String,
+    pub file_name: String,
+}
+
+/// Copia validada a `bios_dir` (testable sin AppHandle).
+pub fn import_pcsx2_bios_into(
+    src: &Path,
+    bios_dir: &Path,
+) -> Result<ImportPcsx2BiosResult, String> {
+    if !path_is_regular_file_not_symlink(src) {
+        return Err("La ruta debe ser un archivo regular (no carpeta ni enlace simbólico).".into());
+    }
+    let len = fs::metadata(src).map_err(|e| e.to_string())?.len();
+    if len > BIOS_MAX_BYTES {
+        return Err(format!(
+            "El archivo supera el máximo de {} MiB para una BIOS de PS2.",
+            BIOS_MAX_BYTES / (1024 * 1024)
+        ));
+    }
+    if len < BIOS_MIN_BYTES {
+        return Err("El archivo es demasiado pequeño para una BIOS de PS2.".into());
+    }
+    if !is_valid_pcsx2_bios_file(src) {
+        return Err(
+            "El archivo no parece una BIOS de PS2 válida (ROMDIR/ROMVER). Elegí un dump de tu consola."
+                .into(),
+        );
+    }
+    let file_name = sanitize_bios_file_name(
+        src.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(""),
+    )
+    .ok_or_else(|| "Nombre de archivo inválido.".to_string())?;
+
+    fs::create_dir_all(bios_dir).map_err(|e| e.to_string())?;
+
+    if let Some(existing) = find_valid_pcsx2_bios(bios_dir) {
+        if existing.file_name().and_then(|s| s.to_str()) == Some(file_name.as_str()) {
+            return Ok(ImportPcsx2BiosResult {
+                dest_path: existing.to_string_lossy().to_string(),
+                file_name,
+            });
+        }
+        return Err(
+            "Ya hay otra BIOS válida en la carpeta. Abrí la carpeta, quitá la anterior y volvé a importar."
+                .into(),
+        );
+    }
+
+    let dest = bios_dir.join(&file_name);
+    // Copia atómica: escribir a .tmp y rename al destino final.
+    let tmp = bios_dir.join(format!(".import-{file_name}.tmp"));
+    fs::copy(src, &tmp).map_err(|e| format!("No se pudo copiar la BIOS: {e}"))?;
+    fs::rename(&tmp, &dest).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("No se pudo finalizar la importación: {e}")
+    })?;
+    if tmp.exists() {
+        return Err("Quedó un temporal tras la importación; copia no atómica.".into());
+    }
+
+    Ok(ImportPcsx2BiosResult {
+        dest_path: dest.to_string_lossy().to_string(),
+        file_name,
+    })
+}
+
+/// Importa una BIOS PS2 del usuario a `emulator-data/pcsx2/PCSX2/bios`.
+/// Valida ROMDIR/ROMVER; no sobrescribe una BIOS válida distinta sin avisar.
+#[tauri::command]
+pub fn import_pcsx2_bios(app: AppHandle, path: String) -> Result<ImportPcsx2BiosResult, String> {
+    let src = PathBuf::from(path.trim());
+    let app_data = app_data_dir(&app)?;
+    let datapath = managed_data_root(&app_data, "pcsx2");
+    let data_root = pcsx2_internal_data_root(&datapath);
+    seed_pcsx2_ini_if_missing(&data_root).map_err(|e| format!("{e:?}"))?;
+    let bios_dir = pcsx2_bios_directory(&data_root);
+    let result = import_pcsx2_bios_into(&src, &bios_dir)?;
+    // PCSX2 v2.8.2: con `[Filenames] Bios` vacío, `FindBiosImage` en BiosTools.cpp
+    // elige la primera BIOS válida en la carpeta bios; no hace falta escribir la clave.
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn pcsx2_managed_bios_present(app: AppHandle) -> Result<bool, String> {
+    let app_data = app_data_dir(&app)?;
+    let data_root = pcsx2_internal_data_root(&managed_data_root(&app_data, "pcsx2"));
+    let bios_dir = pcsx2_bios_directory(&data_root);
+    Ok(find_valid_pcsx2_bios(&bios_dir).is_some())
+}
+
+#[tauri::command]
+pub fn retroarch_ps1_bios_present(app: AppHandle) -> Result<bool, String> {
+    let app_data = app_data_dir(&app)?;
+    let system = managed_data_root(&app_data, "retroarch").join("system");
+    Ok(find_valid_ps1_bios_in_system(&system).is_some())
+}
+
 #[tauri::command]
 pub fn open_managed_pcsx2_bios_folder(app: AppHandle) -> Result<String, String> {
     let app_data = app_data_dir(&app)?;
@@ -1481,6 +1638,97 @@ mod tests {
         fs::write(&path, vec![0xABu8; 1024 * 1024]).unwrap();
         assert!(!is_valid_pcsx2_bios_file(&path));
         assert!(ensure_pcsx2_bios_for_launch(&root.join("PCSX2")).is_err());
+    }
+
+    #[test]
+    fn import_bios_refuses_second_valid_without_replace() {
+        let root = temp("import-dup");
+        let data = root.join("PCSX2");
+        let bios_dir = pcsx2_bios_directory(&data);
+        fs::create_dir_all(&bios_dir).unwrap();
+        let a = bios_dir.join("scph39001.bin");
+        write_romdir_bios(&a, true);
+        assert!(find_valid_pcsx2_bios(&bios_dir).is_some());
+        let b = root.join("other.bin");
+        write_romdir_bios(&b, true);
+        assert!(is_valid_pcsx2_bios_file(&b));
+        assert_ne!(a.file_name(), b.file_name());
+    }
+
+    #[test]
+    fn ps1_bios_detected_in_system_dir() {
+        let root = temp("ps1-system");
+        let system = root.join("system");
+        fs::create_dir_all(&system).unwrap();
+        assert!(find_valid_ps1_bios_in_system(&system).is_none());
+        let path = system.join("SCPH1001.bin");
+        fs::write(&path, vec![0u8; PS1_BIOS_EXACT_BYTES as usize]).unwrap();
+        assert!(find_valid_ps1_bios_in_system(&system).is_some());
+        let wrong = system.join("scph5501.bin");
+        fs::write(&wrong, vec![0u8; 1024]).unwrap();
+        // El de tamaño exacto sigue ganando.
+        assert_eq!(
+            find_valid_ps1_bios_in_system(&system)
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_ascii_lowercase(),
+            "scph1001.bin"
+        );
+    }
+
+    #[test]
+    fn sanitize_bios_file_name_rejects_traversal() {
+        assert_eq!(
+            sanitize_bios_file_name(r"C:\x\scph.bin").as_deref(),
+            Some("scph.bin")
+        );
+        assert!(sanitize_bios_file_name("..").is_none());
+        assert!(sanitize_bios_file_name("").is_none());
+    }
+
+    #[test]
+    fn import_pcsx2_bios_rejects_oversize() {
+        let root = temp("bios-oversize");
+        let bios_dir = root.join("bios");
+        let path = root.join("huge.bin");
+        fs::create_dir_all(&root).unwrap();
+        // 8 MiB + 1 sin ROMDIR: debe fallar por tamaño antes de validar firma.
+        let over = (BIOS_MAX_BYTES as usize) + 1;
+        fs::write(&path, vec![0u8; over]).unwrap();
+        let err = import_pcsx2_bios_into(&path, &bios_dir).unwrap_err();
+        assert!(err.contains("supera el máximo"), "{err}");
+        assert!(!bios_dir.join("huge.bin").exists());
+    }
+
+    #[test]
+    fn import_pcsx2_bios_rejects_directory() {
+        let root = temp("bios-dir");
+        let bios_dir = root.join("bios");
+        fs::create_dir_all(&root).unwrap();
+        let err = import_pcsx2_bios_into(&root, &bios_dir).unwrap_err();
+        assert!(err.contains("archivo regular"), "{err}");
+    }
+
+    #[test]
+    fn import_pcsx2_bios_atomic_leaves_no_tmp() {
+        let root = temp("bios-atomic");
+        let bios_dir = root.join("PCSX2").join("bios");
+        let src = root.join("scph39001.bin");
+        write_romdir_bios(&src, true);
+        let res = import_pcsx2_bios_into(&src, &bios_dir).unwrap();
+        assert!(Path::new(&res.dest_path).is_file());
+        let leftovers: Vec<_> = fs::read_dir(&bios_dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".import-")
+            })
+            .collect();
+        assert!(leftovers.is_empty());
     }
 
     #[test]

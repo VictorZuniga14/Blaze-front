@@ -31,6 +31,8 @@ export const useLaunchStore = defineStore("launch", () => {
   const activeGameId = ref<string | null>(null);
   const lastResult = ref<LastProcessResult | null>(null);
   const error = ref<string | null>(null);
+  /** Aviso no bloqueante (p. ej. PS1 sin BIOS con SwanStation). */
+  const softWarning = ref<string | null>(null);
 
   let listening = false;
 
@@ -120,6 +122,7 @@ export const useLaunchStore = defineStore("launch", () => {
 
   async function play(gameId: string): Promise<void> {
     error.value = null;
+    softWarning.value = null;
     lastResult.value = null;
     useRaProgressStore().clearPostPlayNotice();
     await ensureListener();
@@ -136,7 +139,15 @@ export const useLaunchStore = defineStore("launch", () => {
     activeGameId.value = gameId;
 
     try {
-      const active = await launchService.launchGame(gameId);
+      const { active, softWarning: warn } = await launchService.launchGame(
+        gameId,
+        {
+          onSoftWarning: (message) => {
+            softWarning.value = message;
+          },
+        },
+      );
+      softWarning.value = warn;
       status.value = active.status;
       activePid.value = active.pid;
       activeGameId.value = active.gameId;
@@ -172,6 +183,7 @@ export const useLaunchStore = defineStore("launch", () => {
     activeGameId,
     lastResult,
     error,
+    softWarning,
     isBusy,
     loadConfig,
     saveConfig,
