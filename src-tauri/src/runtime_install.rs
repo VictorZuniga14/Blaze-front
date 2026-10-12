@@ -553,8 +553,8 @@ fn copy_tree_overwrite(source: &Path, destination: &Path) -> Result<(), InstallE
 #[derive(Debug, Deserialize)]
 struct BundleMeta {
     version: String,
-    /// Sha del `.7z` local (puede diferir del manifiesto remoto). Se deserializa del JSON.
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    /// Sha del `.7z` local empaquetado (puede diferir del hash remoto del manifiesto).
+    /// Se verifica contra el archivo real al instalar desde el pack del instalador.
     sha256: String,
 }
 
@@ -706,6 +706,15 @@ fn try_install_from_bundle(
         pack_entry.max_extract_entries = 50_000;
         let cancel = Arc::new(AtomicBool::new(false));
         let archive_sha256 = sha256_file(&archive)?;
+        // `*.blaze-bundle.json` declara el sha del .7z local (no el del artefacto remoto).
+        if !meta.sha256.is_empty()
+            && !archive_sha256.eq_ignore_ascii_case(meta.sha256.trim())
+        {
+            return Err(InstallError::HashMismatch {
+                expected: meta.sha256.clone(),
+                got: archive_sha256,
+            });
+        }
         extract_7z_tree(&archive, &extract_dir, &pack_entry, &cancel)?;
 
         let info = finalize_bundled_install(
@@ -2625,9 +2634,16 @@ mod tests {
     #[test]
     fn manifest_retroarch_lists_default_cores_and_pack() {
         let ra = lookup_manifest("retroarch").unwrap();
-        assert!(ra.cores.contains(&"swanstation_libretro.dll".into()));
-        assert!(ra.cores.contains(&"fceumm_libretro.dll".into()));
-        assert_eq!(ra.cores.len(), 10);
+        for required in [
+            "swanstation_libretro.dll",
+            "pcsx_rearmed_libretro.dll",
+            "fceumm_libretro.dll",
+        ] {
+            assert!(
+                ra.cores.iter().any(|c| c == required),
+                "falta core requerido en manifiesto: {required}"
+            );
+        }
         let pack = ra.cores_pack.as_ref().expect("cores_pack");
         assert!(pack.url.contains("RetroArch_cores.7z"));
         assert_eq!(pack.hash_origin, HashOrigin::ComputedLocally);
