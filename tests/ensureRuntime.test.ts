@@ -4,6 +4,7 @@ import {
   __resetEnsureRuntimeFlightsForTests,
   ensureRuntime,
 } from "../src/services/ensureRuntime.service";
+import { EnsureRuntimeError } from "../src/services/ensureRuntimeErrors";
 import type { InstalledRuntimeInfo, Runtime } from "../src/types/runtime";
 
 function runtime(partial: Partial<Runtime> & Pick<Runtime, "id" | "type" | "executablePath">): Runtime {
@@ -57,7 +58,7 @@ describe("ensureRuntime", () => {
     });
 
     const deps = {
-      pathExists: async () => false,
+      pathExists: async (p: string) => p.includes("pcsx2-qt.exe"),
       listRuntimes: async () => [] as Runtime[],
       manifestVersion: async () => "2.8.2",
       installRuntime: async (id: string) => {
@@ -182,7 +183,7 @@ describe("ensureRuntime", () => {
   it("Nintendo Switch instala runtime eden", async () => {
     let installs = 0;
     const result = await ensureRuntime("Nintendo Switch", {
-      pathExists: async () => false,
+      pathExists: async (p: string) => p.includes("eden.exe"),
       listRuntimes: async () => [] as Runtime[],
       manifestVersion: async () => "0.2.1",
       installRuntime: async (id) => {
@@ -211,6 +212,66 @@ describe("ensureRuntime", () => {
     assert.equal(result.type, "eden");
     assert.equal(result.name, "Eden");
     assert.equal(result.version, "0.2.1");
+  });
+
+  it("reintenta si el exe desaparece tras instalar (antivirus)", async () => {
+    let installs = 0;
+    const result = await ensureRuntime("NES", {
+      pathExists: async (p) => p.includes("retroarch.exe") && installs >= 2,
+      listRuntimes: async () => [] as Runtime[],
+      manifestVersion: async () => "1.22.2",
+      installRuntime: async () => {
+        installs += 1;
+        return {
+          id: "retroarch",
+          version: "1.22.2",
+          executablePath: "C:\\AppData\\runtimes\\retroarch\\1.22.2\\retroarch.exe",
+          rootPath: "C:\\AppData\\runtimes\\retroarch\\1.22.2",
+        };
+      },
+      upsertManaged: async (input) =>
+        runtime({
+          id: "managed-ra",
+          type: input.type,
+          name: input.name,
+          executablePath: input.executablePath,
+          source: "managed",
+          version: input.version,
+        }),
+    });
+
+    assert.equal(installs, 2);
+    assert.equal(result.type, "retroarch");
+  });
+
+  it("falla con antivirus tras agotar reintentos", async () => {
+    let installs = 0;
+    await assert.rejects(
+      () =>
+        ensureRuntime("NES", {
+          pathExists: async () => false,
+          listRuntimes: async () => [] as Runtime[],
+          manifestVersion: async () => "1.22.2",
+          installRuntime: async () => {
+            installs += 1;
+            return {
+              id: "retroarch",
+              version: "1.22.2",
+              executablePath: "C:\\missing\\retroarch.exe",
+              rootPath: "C:\\missing",
+            };
+          },
+          upsertManaged: async () => {
+            throw new Error("no upsert");
+          },
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof EnsureRuntimeError);
+        assert.equal(err.code, "antivirus");
+        assert.equal(installs, 3);
+        return true;
+      },
+    );
   });
 
   it("managed al día con el manifiesto: no reinstala", async () => {

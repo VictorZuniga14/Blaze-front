@@ -19,15 +19,36 @@ import { runtimeRepository } from "../repositories/runtime.repository";
 import type { CatalogGame } from "../types/catalog";
 import type { Game } from "../types/game";
 import { ensureRuntime } from "./ensureRuntime.service";
-import { resolveRetroArchLaunchArguments } from "../utils/platformRuntime";
+import { EnsureRuntimeError } from "./ensureRuntimeErrors";
+import {
+  resolveRetroArchLaunchArguments,
+  runtimeKindForPlatform,
+} from "../utils/platformRuntime";
 import { resolveAvailableLanguages } from "../utils/gameLanguages";
 
 export type CatalogInstallProgress = {
-  phase: "resolving" | "downloading" | "installing";
+  phase:
+    | "resolving"
+    | "preparing_runtime"
+    | "downloading"
+    | "installing"
+    | "waiting_bios";
   bytesDone: number;
   bytesTotal: number;
   message: string;
+  /** Id de operación Rust para cancelar la instalación del emulador. */
+  runtimeOperationId?: string | null;
 };
+
+/** PS2: runtime listo pero falta BIOS del usuario. */
+export class CatalogInstallNeedsPcsx2BiosError extends Error {
+  constructor() {
+    super(
+      "Importá una BIOS de PS2 de tu propia consola para continuar con la descarga.",
+    );
+    this.name = "CatalogInstallNeedsPcsx2BiosError";
+  }
+}
 
 export type CatalogInstallResult = {
   game: Game;
@@ -232,13 +253,50 @@ export const catalogInstallService = {
 
     const catalog = await catalogApiService.get(game.catalogRemoteId);
     const platform = catalog.platform || game.platform;
+    let lastRuntimeOpId: string | null = null;
+    let runtime;
+    try {
+      runtime = await ensureRuntime(platform, {
+        onProgress: (p) => {
+          if (p.operationId) lastRuntimeOpId = p.operationId;
+          onProgress?.({
+            phase: "preparing_runtime",
+            bytesDone: p.bytesDone,
+            bytesTotal: p.bytesTotal,
+            message: p.message || "Preparando emulador…",
+            runtimeOperationId: p.operationId || lastRuntimeOpId,
+          });
+        },
+      });
+    } catch (err) {
+      if (err instanceof EnsureRuntimeError) {
+        throw err;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new EnsureRuntimeError("unknown", msg, true);
+    }
+
+    if (runtimeKindForPlatform(platform) === "pcsx2") {
+      const hasBios = await invoke<boolean>("pcsx2_managed_bios_present");
+      if (!hasBios) {
+        onProgress?.({
+          phase: "waiting_bios",
+          bytesDone: 0,
+          bytesTotal: 0,
+          message:
+            "Necesitás una BIOS de PS2 de tu propia consola (una sola vez). Importala abajo para continuar.",
+          runtimeOperationId: lastRuntimeOpId,
+        });
+        throw new CatalogInstallNeedsPcsx2BiosError();
+      }
+    }
+
     onProgress?.({
-      phase: "resolving",
+      phase: "downloading",
       bytesDone: 0,
       bytesTotal: 0,
-      message: "Preparando emulador…",
+      message: "Descargando juego…",
     });
-    const runtime = await ensureRuntime(platform);
 
     const { destPath, coverLocalPath, installPaths } =
       await downloadCatalogPayload(catalog, onProgress);
@@ -284,7 +342,7 @@ export const catalogInstallService = {
     });
 
     await gameContentService.associate({ gameId, path: destPath });
-    const argumentsForLaunch = await resolveRetroArchLaunchArguments(
+    const resolvedLaunch = await resolveRetroArchLaunchArguments(
       runtime,
       platform,
       [],
@@ -296,7 +354,7 @@ export const catalogInstallService = {
       contentPath: destPath,
       executablePath: null,
       workingDirectory: null,
-      arguments: argumentsForLaunch,
+      arguments: resolvedLaunch.arguments,
     });
 
     if (coverLocalPath && !game.coverPath?.trim()) {

@@ -48,6 +48,7 @@
         "mgba_libretro.dll",
         "genesis_plus_gx_libretro.dll",
         "swanstation_libretro.dll",
+        "pcsx_rearmed_libretro.dll",
         "mupen64plus_next_libretro.dll",
         "ppsspp_libretro.dll",
         "dolphin_libretro.dll",

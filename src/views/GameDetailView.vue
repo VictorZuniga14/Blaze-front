@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { storeToRefs } from "pinia";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import DownloadProgressHud from "../components/DownloadProgressHud.vue";
+import Pcsx2BiosImportPanel from "../components/Pcsx2BiosImportPanel.vue";
 import AchievementsMedalIcon from "../components/icons/AchievementsMedalIcon.vue";
 import DownloadIcon from "../components/icons/DownloadIcon.vue";
 import FavoriteHeartIcon from "../components/icons/FavoriteHeartIcon.vue";
@@ -56,6 +57,7 @@ const {
   activeGameId,
   lastResult,
   error: launchError,
+  softWarning: launchSoftWarning,
   isBusy,
 } = storeToRefs(launch);
 const { postPlayNotice } = storeToRefs(raProgress);
@@ -123,6 +125,13 @@ const cloudRepairTitle = computed(
 );
 const cloudRepairPercent = computed(() => downloadJob.value?.percent ?? 0);
 const cloudRepairDetail = computed(() => downloadJob.value?.detail ?? null);
+const waitingPcsx2Bios = computed(
+  () => downloadJob.value?.status === "waiting_bios",
+);
+
+function onPcsx2BiosImported() {
+  catalogDownloads.resumeAfterPcsx2Bios(gameId.value);
+}
 
 const coverSrc = computed(() =>
   game.value ? catalogCovers.coverForGame(game.value) : null,
@@ -368,6 +377,7 @@ async function refreshRa() {
 async function play() {
   if (!gameId.value) return;
   pageError.value = null;
+  contentInfo.value = null;
 
   // Prep en silencio: sin overlay; si falla, solo pageError.
   const prep = await runLaunchPreparation(gameId.value, () => {});
@@ -379,6 +389,9 @@ async function play() {
   await launch.play(gameId.value);
   if (launchError.value) {
     pageError.value = launchError.value;
+  } else if (launchSoftWarning.value) {
+    // Ps1BiosRecommended u otros avisos: no bloquean el lanzamiento.
+    contentInfo.value = launchSoftWarning.value;
   }
 }
 
@@ -694,11 +707,21 @@ async function confirmDelete() {
 
           <div class="action-bar__stats">
             <DownloadProgressHud
-              v-if="repairingFromCloud"
+              v-if="repairingFromCloud && !waitingPcsx2Bios"
               class="stat stat--download"
               :title="cloudRepairTitle"
               :percent="cloudRepairPercent"
               :detail="cloudRepairDetail"
+              :show-cancel="
+                cloudRepairTitle.includes('EMULADOR') &&
+                !!downloadJob?.runtimeOperationId
+              "
+              @cancel="catalogDownloads.cancelRuntimeInstall(gameId)"
+            />
+            <Pcsx2BiosImportPanel
+              v-if="waitingPcsx2Bios"
+              class="stat stat--download"
+              @imported="onPcsx2BiosImported"
             />
             <div
               v-if="game?.catalogRemoteId || needsCloudRepair || repairingFromCloud"

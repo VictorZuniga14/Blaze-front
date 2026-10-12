@@ -5,6 +5,10 @@ import {
 } from "./raConsoles";
 
 /**
+ * Propuesta (sin implementar): si RetroArch managed ya está instalado pero falta
+ * un core nuevo del manifiesto, extraer solo ese `.dll` desde `RetroArch_cores.7z`
+ * verificado (misma ruta que `install_cores_into_extract`) sin reinstalar todo el runtime.
+ *
  * Cores preferidos por consola (nombre de archivo en `cores/`).
  * El primero existente gana; el resto son fallbacks.
  * PS2 no usa RetroArch en Blaze (PCSX2).
@@ -24,6 +28,7 @@ export const RETROARCH_CORE_CANDIDATES: Record<
   genesis: ["genesis_plus_gx_libretro.dll"],
   ps1: [
     "swanstation_libretro.dll",
+    "pcsx_rearmed_libretro.dll",
     "mednafen_psx_hw_libretro.dll",
     "mednafen_psx_libretro.dll",
   ],
@@ -82,14 +87,34 @@ export function retroArchCoreCandidatesForPlatform(
  * (`runtimes/retroarch/<ver>/cores/`) y manual típico.
  * No comprueba existencia en disco.
  */
+export type RetroArchCorePickOptions = {
+  /** PS1: true → SwanStation; false → pcsx_rearmed (HLE). */
+  ps1HasExternalBios?: boolean;
+};
+
+export function retroArchCoreDllOrder(
+  platform: string | null | undefined,
+  options?: RetroArchCorePickOptions,
+): readonly string[] {
+  const resolved = retroArchCoreCandidatesForPlatform(platform);
+  if (!resolved) return [];
+  if (resolved.key === "ps1" && options?.ps1HasExternalBios === false) {
+    const hle = "pcsx_rearmed_libretro.dll";
+    const rest = resolved.dlls.filter((d) => d !== hle);
+    return [hle, ...rest];
+  }
+  return resolved.dlls;
+}
+
 export function retroArchCorePathCandidates(
   retroArchExe: string,
   platform: string | null | undefined,
+  options?: RetroArchCorePickOptions,
 ): string[] {
-  const resolved = retroArchCoreCandidatesForPlatform(platform);
-  if (!resolved) return [];
+  const dlls = retroArchCoreDllOrder(platform, options);
+  if (dlls.length === 0) return [];
   const coresDir = joinLocalPath(parentDir(retroArchExe), "cores");
-  return resolved.dlls.map((dll) => joinLocalPath(coresDir, dll));
+  return dlls.map((dll) => joinLocalPath(coresDir, dll));
 }
 
 export function hasRetroArchCoreFlag(args: readonly string[]): boolean {
@@ -103,12 +128,27 @@ export function retroArchCoreArgs(corePath: string): string[] {
 
 export function missingRetroArchCoreMessage(
   platform: string | null | undefined,
+  preferredDll?: string,
 ): string {
   const resolved = retroArchCoreCandidatesForPlatform(platform);
   if (!resolved) {
     return "No se pudo determinar el core de RetroArch para esta plataforma.";
   }
   const label = RA_CONSOLE_LABELS[resolved.key];
-  const primary = resolved.dlls[0];
+  const primary = preferredDll ?? resolved.dlls[0];
   return `Falta el core de RetroArch para ${label} (${primary}). Instalálo desde RetroArch → Online Updater → Core Downloader y volvé a intentar.`;
+}
+
+/**
+ * Elige el primer DLL de `order` cuya ruta exista.
+ * Si ninguno existe → null (caller debe lanzar CoreMissing).
+ */
+export async function pickFirstExistingCore(
+  candidates: readonly string[],
+  pathExists: (path: string) => Promise<boolean>,
+): Promise<string | null> {
+  for (const corePath of candidates) {
+    if (await pathExists(corePath)) return corePath;
+  }
+  return null;
 }

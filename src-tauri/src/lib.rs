@@ -22,8 +22,9 @@ use ra_identify::identify_ra_content;
 use ra_status::{inspect_emulator_retroachievements, open_emulator_for_configuration};
 use emulator_data::{
     apply_managed_ra_credentials, import_eden_firmware_zip, initialize_emulator_data,
-    install_eden_title_nsps, open_managed_eden_keys_folder, open_managed_pcsx2_bios_folder,
-    prepare_runtime_launch,
+    import_pcsx2_bios, install_eden_title_nsps, open_managed_eden_keys_folder,
+    open_managed_pcsx2_bios_folder, pcsx2_managed_bios_present, prepare_runtime_launch,
+    retroarch_ps1_bios_present,
 };
 use eden_config::{
     launch_eden_config_ui, launch_runtime_config_ui, list_audio_output_devices,
@@ -32,7 +33,8 @@ use eden_config::{
     write_runtime_audio_settings, write_runtime_video_settings,
 };
 use runtime_install::{
-    cancel_runtime_install, install_runtime, runtime_manifest_ids, runtime_manifest_list,
+    cancel_runtime_install, install_runtime, runtime_cores_status, runtime_manifest_ids,
+    runtime_manifest_list,
 };
 use std::sync::Arc;
 use tauri::{
@@ -82,10 +84,14 @@ pub fn run() {
             remove_path,
             install_runtime,
             cancel_runtime_install,
+            runtime_cores_status,
             runtime_manifest_ids,
             runtime_manifest_list,
             prepare_runtime_launch,
+            import_pcsx2_bios,
             open_managed_pcsx2_bios_folder,
+            pcsx2_managed_bios_present,
+            retroarch_ps1_bios_present,
             open_managed_eden_keys_folder,
             import_eden_firmware_zip,
             install_eden_title_nsps,
