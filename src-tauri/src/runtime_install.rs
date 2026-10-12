@@ -115,11 +115,29 @@ struct ManifestFile {
     runtimes: Vec<RuntimeManifestEntry>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InstallSource {
+    Bundle,
+    Download,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledMarker {
     pub id: String,
     pub version: String,
+    /// Hash del artefacto del manifiesto (identidad de versión). Se conserva para
+    /// compatibilidad con marcadores antiguos e `is_version_installed`.
     pub sha256: String,
+    /// Origen de la instalación. Opcional al leer (marcadores viejos).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<InstallSource>,
+    /// Sha256 del `.7z` realmente usado (bundle o descarga). Opcional al leer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_sha256: Option<String>,
+    /// Sha256 del ejecutable principal tras instalar. Opcional al leer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exe_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -480,6 +498,7 @@ fn finalize_bundled_install(
     operation_id: &str,
     extract_dir: &Path,
     tmp_root: &Path,
+    archive_sha256: Option<String>,
 ) -> Result<InstalledRuntimeInfo, InstallError> {
     let exe_path = extract_dir.join(&entry.exe);
     if !exe_path.is_file() {
@@ -498,10 +517,14 @@ fn finalize_bundled_install(
         });
     }
 
+    let exe_sha256 = sha256_file(&exe_path)?;
     let marker = InstalledMarker {
         id: entry.id.clone(),
         version: entry.version.clone(),
         sha256: entry.sha256.clone(),
+        source: Some(InstallSource::Bundle),
+        archive_sha256,
+        exe_sha256: Some(exe_sha256),
     };
     let marker_raw =
         serde_json::to_string_pretty(&marker).map_err(|e| InstallError::Io(e.to_string()))?;
@@ -524,6 +547,19 @@ fn finalize_bundled_install(
     })
 }
 
+/// En release, PCSX2 y RetroArch solo se instalan por descarga del manifiesto.
+/// En desarrollo (`debug_assertions`) el bundle/staging sigue permitido.
+fn bundle_install_allowed_for(runtime_id: &str, debug_assertions: bool) -> bool {
+    if debug_assertions {
+        return true;
+    }
+    runtime_id != "pcsx2" && runtime_id != "retroarch"
+}
+
+fn bundle_install_allowed(runtime_id: &str) -> bool {
+    bundle_install_allowed_for(runtime_id, cfg!(debug_assertions))
+}
+
 /// Si el instalador trae el emulador (pack .7z o carpeta), lo instala en AppData/runtimes sin red.
 fn try_install_from_bundle(
     app: Option<&AppHandle>,
@@ -531,6 +567,10 @@ fn try_install_from_bundle(
     entry: &RuntimeManifestEntry,
     operation_id: &str,
 ) -> Result<Option<InstalledRuntimeInfo>, InstallError> {
+    if !bundle_install_allowed(&entry.id) {
+        return Ok(None);
+    }
+
     let Some(app) = app else {
         return Ok(None);
     };
@@ -580,6 +620,7 @@ fn try_install_from_bundle(
         pack_entry.max_extract_bytes = 2 * 1024 * 1024 * 1024; // 2 GiB
         pack_entry.max_extract_entries = 50_000;
         let cancel = Arc::new(AtomicBool::new(false));
+        let archive_sha256 = sha256_file(&archive)?;
         extract_7z_tree(&archive, &extract_dir, &pack_entry, &cancel)?;
 
         let info = finalize_bundled_install(
@@ -589,6 +630,7 @@ fn try_install_from_bundle(
             operation_id,
             &extract_dir,
             &tmp_root,
+            Some(archive_sha256),
         )?;
         return Ok(Some(info));
     }
@@ -617,7 +659,15 @@ fn try_install_from_bundle(
     );
     ensure_disk_space(root, 512 * 1024 * 1024)?;
     copy_tree_overwrite(&src, &extract_dir)?;
-    let info = finalize_bundled_install(app, root, entry, operation_id, &extract_dir, &tmp_root)?;
+    let info = finalize_bundled_install(
+        app,
+        root,
+        entry,
+        operation_id,
+        &extract_dir,
+        &tmp_root,
+        None,
+    )?;
     Ok(Some(info))
 }
 
@@ -900,6 +950,22 @@ fn verify_sha256_hex(got: &str, expected: &str) -> Result<(), InstallError> {
             got: got.to_string(),
         })
     }
+}
+
+fn sha256_file(path: &Path) -> Result<String, InstallError> {
+    let mut file = File::open(path).map_err(|e| InstallError::Io(e.to_string()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| InstallError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn ensure_disk_space(root: &Path, need: u64) -> Result<(), InstallError> {
@@ -1319,7 +1385,7 @@ pub async fn install_runtime_into(
             ArchiveKind::SevenZ => "7z",
         }));
 
-        download_with_hash(
+        let archive_sha256 = download_with_hash(
             app,
             operation_id,
             &download_spec_for_runtime(entry),
@@ -1401,10 +1467,14 @@ pub async fn install_runtime_into(
             }
         }
 
+        let exe_sha256 = sha256_file(&exe_path)?;
         let marker = InstalledMarker {
             id: entry.id.clone(),
             version: entry.version.clone(),
             sha256: entry.sha256.clone(),
+            source: Some(InstallSource::Download),
+            archive_sha256: Some(archive_sha256),
+            exe_sha256: Some(exe_sha256),
         };
         let marker_raw = serde_json::to_string_pretty(&marker)
             .map_err(|e| InstallError::Io(e.to_string()))?;
@@ -1617,6 +1687,9 @@ mod tests {
             id: entry.id.clone(),
             version: entry.version.clone(),
             sha256: entry.sha256.clone(),
+            source: Some(InstallSource::Download),
+            archive_sha256: Some("aa".into()),
+            exe_sha256: Some("bb".into()),
         };
         fs::write(
             marker_path(&dir),
@@ -1624,6 +1697,86 @@ mod tests {
         )
         .unwrap();
         assert!(is_version_installed(root.as_path(), entry));
+    }
+
+    #[test]
+    fn old_marker_without_source_or_hashes_still_valid() {
+        let root = temp_root("old-marker");
+        let entry = lookup_manifest("pcsx2").unwrap();
+        let dir = version_dir(&root, &entry.id, &entry.version);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(&entry.exe), b"fake").unwrap();
+        // Marcador legado: solo id/version/sha256 (sin source / archive_sha256 / exe_sha256).
+        let legacy = format!(
+            r#"{{"id":"{}","version":"{}","sha256":"{}"}}"#,
+            entry.id, entry.version, entry.sha256
+        );
+        fs::write(marker_path(&dir), legacy).unwrap();
+        let parsed: InstalledMarker = serde_json::from_str(
+            &fs::read_to_string(marker_path(&dir)).unwrap(),
+        )
+        .unwrap();
+        assert!(parsed.source.is_none());
+        assert!(parsed.archive_sha256.is_none());
+        assert!(parsed.exe_sha256.is_none());
+        assert!(
+            is_version_installed(root.as_path(), entry),
+            "un marcador antiguo no debe invalidar la instalación"
+        );
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn release_skips_bundle_for_pcsx2_and_retroarch() {
+        assert!(!bundle_install_allowed("pcsx2"));
+        assert!(!bundle_install_allowed("retroarch"));
+        assert!(bundle_install_allowed("eden"));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn debug_allows_bundle_for_pcsx2_and_retroarch() {
+        assert!(bundle_install_allowed("pcsx2"));
+        assert!(bundle_install_allowed("retroarch"));
+        assert!(bundle_install_allowed("eden"));
+    }
+
+    #[test]
+    fn marker_records_source_and_real_hashes() {
+        let root = temp_root("marker-hashes");
+        let entry = lookup_manifest("pcsx2").unwrap();
+        let dir = version_dir(&root, &entry.id, &entry.version);
+        fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join(&entry.exe);
+        fs::write(&exe, b"blaze-exe-bytes").unwrap();
+        let archive = root.join("pack.7z");
+        fs::write(&archive, b"blaze-archive-bytes").unwrap();
+        let archive_sha = sha256_file(&archive).unwrap();
+        let exe_sha = sha256_file(&exe).unwrap();
+        let marker = InstalledMarker {
+            id: entry.id.clone(),
+            version: entry.version.clone(),
+            sha256: entry.sha256.clone(),
+            source: Some(InstallSource::Download),
+            archive_sha256: Some(archive_sha.clone()),
+            exe_sha256: Some(exe_sha.clone()),
+        };
+        let raw = serde_json::to_string_pretty(&marker).unwrap();
+        fs::write(marker_path(&dir), &raw).unwrap();
+        let loaded: InstalledMarker =
+            serde_json::from_str(&fs::read_to_string(marker_path(&dir)).unwrap()).unwrap();
+        assert_eq!(loaded.source, Some(InstallSource::Download));
+        assert_eq!(loaded.archive_sha256.as_deref(), Some(archive_sha.as_str()));
+        assert_eq!(loaded.exe_sha256.as_deref(), Some(exe_sha.as_str()));
+        assert!(is_version_installed(root.as_path(), entry));
+
+        let bundled = InstalledMarker {
+            source: Some(InstallSource::Bundle),
+            archive_sha256: Some("packhash".into()),
+            exe_sha256: Some(exe_sha),
+            ..marker
+        };
+        assert_eq!(bundled.source, Some(InstallSource::Bundle));
     }
 
     #[test]

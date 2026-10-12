@@ -82,17 +82,7 @@ foreach ($id in @("pcsx2", "retroarch")) {
   Set-Content -Encoding utf8 (Join-Path $packs "$id.blaze-bundle.json") -Value $meta
 }
 
-Write-Host "Creando pcsx2.7z..."
-$pcsx2Pack = Join-Path $packs "pcsx2.7z"
-if (Test-Path $pcsx2Pack) { Remove-Item $pcsx2Pack -Force }
-& $SevenZip a -t7z -mx=5 -mmt=on $pcsx2Pack "$stagingPcsx2\*" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "7z pcsx2 falló: $LASTEXITCODE" }
-
-Write-Host "Creando retroarch.7z (sin shaders)..."
-$raPack = Join-Path $packs "retroarch.7z"
-if (Test-Path $raPack) { Remove-Item $raPack -Force }
-& $SevenZip a -t7z -mx=5 -mmt=on "-xr!shaders" $raPack "$stagingRa\*" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "7z retroarch falló: $LASTEXITCODE" }
+Write-Host "Omitiendo packs pcsx2.7z / retroarch.7z (se instalan por descarga del manifiesto)."
 
 if (Test-Path (Join-Path $EdenPath "eden.exe")) {
   # Pack completo (MSVC estático o MinGW+Qt). Nunca listar solo Qt6*.dll sin platforms/.

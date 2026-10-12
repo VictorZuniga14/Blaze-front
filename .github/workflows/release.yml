@@ -1,7 +1,7 @@
 # Publica el instalador Blaze (Windows NSIS) al pushear un tag v* o desde Actions.
 # Requisito: Release fijo "vendor" con:
-#   pcsx2.7z + retroarch.7z + bios.7z + eden-keys.7z + eden-firmware.7z
-#   (+ eden.7z opcional para runtime offline)
+#   bios.7z + eden-keys.7z + eden-firmware.7z + eden.7z
+#   (PCSX2/RetroArch se descargan en runtime desde el manifiesto; no van en vendor/packs)
 # bios / keys / firmware se extraen a resources/ y van en el instalador.
 
 name: Release
@@ -85,8 +85,6 @@ jobs:
           }
 
           $required = @(
-            "pcsx2.7z",
-            "retroarch.7z",
             "bios.7z",
             "eden-keys.7z",
             "eden-firmware.7z"
@@ -94,9 +92,6 @@ jobs:
           foreach ($name in $required) {
             $src = Join-Path $tmp $name
             if (-not (Test-Path $src)) { throw "En Release vendor falta: $name" }
-            if ($name -in @("pcsx2.7z", "retroarch.7z")) {
-              Copy-Item $src (Join-Path $packs $name) -Force
-            }
           }
           # Runtime Eden offline (obligatorio para Switch sin red a git.eden-emu.dev).
           $edenRt = Join-Path $tmp "eden.7z"
@@ -105,14 +100,15 @@ jobs:
           }
           Copy-Item $edenRt (Join-Path $packs "eden.7z") -Force
 
-          # JSON de vendor si existen (opcionales).
+          # JSON de vendor si existen (opcionales). pcsx2/retroarch ya no van en packs/.
           Get-ChildItem $tmp -Filter "*.blaze-bundle.json" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch '^(pcsx2|retroarch)\.blaze-bundle\.json$' } |
             ForEach-Object { Copy-Item $_.FullName $packs -Force }
 
           # Siempre generar/actualizar blaze-bundle.json desde el .7z real + versión del manifiesto.
           # Sin este archivo hermano, Blaze ignora el pack offline y baja por URL (falla Eden).
           $manifest = Get-Content "src-tauri/runtimes.manifest.json" -Raw | ConvertFrom-Json
-          foreach ($id in @("pcsx2", "retroarch", "eden")) {
+          foreach ($id in @("eden")) {
             $archive = Join-Path $packs "$id.7z"
             if (-not (Test-Path $archive)) {
               throw "Falta pack offline tras copiar vendor: $id.7z"
