@@ -8,6 +8,8 @@ mod emulator_data;
 mod eden_nsp_install;
 mod eden_config;
 mod runtime_install;
+mod secure_download;
+mod vendor_download;
 
 use catalog_transfer::{
     catalog_games_dir, extract_catalog_zip, extract_zip_archive, http_download_file,
@@ -36,6 +38,7 @@ use runtime_install::{
     cancel_runtime_install, install_runtime, runtime_cores_status, runtime_manifest_ids,
     runtime_manifest_list,
 };
+use vendor_download::download_vendor_asset_command;
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -107,7 +110,8 @@ pub fn run() {
             read_runtime_video_settings,
             write_runtime_video_settings,
             launch_runtime_config_ui,
-            reveal_path_in_explorer
+            reveal_path_in_explorer,
+            download_vendor_asset_command
         ])
         .setup(|app| {
             #[cfg(desktop)]

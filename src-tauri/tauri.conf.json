@@ -35,10 +35,10 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:* https://*; font-src 'self' data:",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": ["resources/**"]
       }
     }
   },
@@ -56,8 +56,7 @@
     "resources": [
       "resources/pcsx2/**/*",
       "resources/retroarch/**/*",
-      "resources/eden/**/*",
-      "resources/emulators/packs/**/*"
+      "resources/eden/**/*"
     ],
     "windows": {
       "nsis": {

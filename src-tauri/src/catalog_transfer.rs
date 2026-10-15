@@ -5,6 +5,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
+use crate::secure_download::{ensure_path_within, sha256_file, SecureDownloadError};
 
 /// Manifest dentro del zip Switch del catálogo (base + update/DLC).
 pub const SWITCH_BUNDLE_MANIFEST: &str = "blaze-switch.json";
@@ -144,6 +145,13 @@ pub async fn http_put_file_range(
     bytes_done_base: u64,
     bytes_total: u64,
 ) -> Result<String, String> {
+    // Validar que el archivo esté dentro de catalog-games
+    let catalog_games = catalog_games_dir(app.clone())?;
+    let catalog_games_path = PathBuf::from(&catalog_games);
+    
+    ensure_path_within(Path::new(&path), &catalog_games_path)
+        .map_err(|_| "Solo se pueden subir archivos desde catalog-games".to_string())?;
+    
     let _ = bytes_done_base; // compat JS; el progreso usa `offset` como id de rango
     tokio::task::spawn_blocking(move || {
         put_file_range_blocking(
@@ -229,6 +237,14 @@ pub async fn http_download_file(
     bytes_total: u64,
 ) -> Result<(), String> {
     let dest = PathBuf::from(&dest_path);
+    
+    // Validar que el destino esté dentro de catalog-games
+    let catalog_games = catalog_games_dir(app.clone())?;
+    let catalog_games_path = PathBuf::from(&catalog_games);
+    
+    ensure_path_within(&dest, &catalog_games_path)
+        .map_err(|_| "Ruta de descarga no permitida fuera de catalog-games".to_string())?;
+    
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -270,8 +286,17 @@ pub async fn http_download_file(
 }
 
 #[tauri::command]
-pub fn path_file_size(path: String) -> Result<u64, String> {
-    let meta = std::fs::metadata(Path::new(&path)).map_err(|e| e.to_string())?;
+pub fn path_file_size(app: AppHandle, path: String) -> Result<u64, String> {
+    let p = Path::new(&path);
+    
+    // Validar que esté dentro de catalog-games
+    let catalog_games = catalog_games_dir(app)?;
+    let catalog_games_path = PathBuf::from(&catalog_games);
+    
+    ensure_path_within(p, &catalog_games_path)
+        .map_err(|_| "Ruta no permitida fuera de catalog-games".to_string())?;
+    
+    let meta = std::fs::metadata(p).map_err(|e| e.to_string())?;
     if !meta.is_file() {
         return Err("La ruta no es un archivo.".into());
     }
@@ -606,7 +631,16 @@ fn extract_zip_flat(zip_path: &Path, dest: &Path) -> Result<Vec<PathBuf>, String
 
 /// Descomprime un zip de catálogo. Devuelve la ruta al .cue / base Switch / primer archivo.
 #[tauri::command]
-pub fn extract_zip_archive(zip_path: String, dest_dir: String) -> Result<String, String> {
+pub fn extract_zip_archive(app: AppHandle, zip_path: String, dest_dir: String) -> Result<String, String> {
+    let catalog_games = catalog_games_dir(app)?;
+    let catalog_games_path = PathBuf::from(&catalog_games);
+    
+    // Validar que ambas rutas estén dentro de catalog-games
+    ensure_path_within(Path::new(&zip_path), &catalog_games_path)
+        .map_err(|_| "Ruta del zip no permitida".to_string())?;
+    ensure_path_within(Path::new(&dest_dir), &catalog_games_path)
+        .map_err(|_| "Ruta de destino no permitida".to_string())?;
+    
     let detail = extract_catalog_zip(zip_path, dest_dir)?;
     Ok(detail.primary_path)
 }
@@ -666,8 +700,26 @@ pub fn extract_catalog_zip(zip_path: String, dest_dir: String) -> Result<SwitchB
 }
 
 #[tauri::command]
-pub fn remove_path(path: String) -> Result<(), String> {
+pub fn remove_path(app: AppHandle, path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
+    
+    // Validar que esté dentro de catalog-games o vendor-temp
+    let catalog_games = catalog_games_dir(app.clone())?;
+    let catalog_games_path = PathBuf::from(&catalog_games);
+    
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No se pudo resolver app data: {e}"))?;
+    let vendor_temp = app_data.join("vendor-temp");
+    
+    let is_catalog = ensure_path_within(&p, &catalog_games_path).is_ok();
+    let is_vendor = ensure_path_within(&p, &vendor_temp).is_ok();
+    
+    if !is_catalog && !is_vendor {
+        return Err("Solo se puede borrar dentro de catalog-games o vendor-temp".into());
+    }
+    
     if !p.exists() {
         return Ok(());
     }
