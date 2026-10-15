@@ -632,13 +632,14 @@ fn finalize_bundled_install(
     })
 }
 
-/// En release, PCSX2 y RetroArch solo se instalan por descarga del manifiesto.
-/// En desarrollo (`debug_assertions`) el bundle/staging sigue permitido.
+/// Ningún runtime se instala desde bundle en release.
+/// En desarrollo (`debug_assertions`) el bundle/staging sigue permitido para pruebas.
 fn bundle_install_allowed_for(runtime_id: &str, debug_assertions: bool) -> bool {
     if debug_assertions {
         return true;
     }
-    runtime_id != "pcsx2" && runtime_id != "retroarch"
+    // En release, todos los emuladores (incluido Eden) se descargan del manifiesto.
+    false
 }
 
 fn bundle_install_allowed(runtime_id: &str) -> bool {
@@ -1841,10 +1842,10 @@ mod tests {
 
     #[test]
     #[cfg(not(debug_assertions))]
-    fn release_skips_bundle_for_pcsx2_and_retroarch() {
+    fn release_skips_bundle_for_all_runtimes() {
         assert!(!bundle_install_allowed("pcsx2"));
         assert!(!bundle_install_allowed("retroarch"));
-        assert!(bundle_install_allowed("eden"));
+        assert!(!bundle_install_allowed("eden"));
     }
 
     #[test]

@@ -54,9 +54,9 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/pcsx2/**/*",
-      "resources/retroarch/**/*",
-      "resources/eden/**/*"
+      "resources/pcsx2/.gitkeep",
+      "resources/retroarch/.gitkeep",
+      "resources/eden/.gitkeep"
     ],
     "windows": {
       "nsis": {
