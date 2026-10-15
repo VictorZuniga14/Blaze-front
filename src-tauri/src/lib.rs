@@ -10,6 +10,8 @@ mod eden_config;
 mod runtime_install;
 mod secure_download;
 mod vendor_download;
+mod emulator_transport;
+mod emulator_full_config;
 
 use catalog_transfer::{
     catalog_games_dir, extract_catalog_zip, extract_zip_archive, http_download_file,
@@ -39,6 +41,14 @@ use runtime_install::{
     runtime_manifest_list,
 };
 use vendor_download::download_vendor_asset_command;
+use emulator_transport::{
+    emulator_transport_send, emulator_transport_probe_retroarch,
+    emulator_transport_check_process,
+};
+use emulator_full_config::{
+    get_emulator_config_capabilities, get_default_emulator_config,
+    apply_emulator_config,
+};
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -111,7 +121,13 @@ pub fn run() {
             write_runtime_video_settings,
             launch_runtime_config_ui,
             reveal_path_in_explorer,
-            download_vendor_asset_command
+            download_vendor_asset_command,
+            emulator_transport_send,
+            emulator_transport_probe_retroarch,
+            emulator_transport_check_process,
+            get_emulator_config_capabilities,
+            get_default_emulator_config,
+            apply_emulator_config
         ])
         .setup(|app| {
             #[cfg(desktop)]
