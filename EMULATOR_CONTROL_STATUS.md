@@ -58,47 +58,46 @@
 - [x] saveState/loadState via PINE
 - [x] status via PINE con parsing de respuesta
 - [x] Gestión de handles y transports
+- [x] Integrado con `launch_native` y `prepare_runtime_launch`
 
-## 🚧 Pendiente (En progreso)
+**retroarchAdapter.ts**
+- [x] EmulatorAdapter completo para RetroArch
+- [x] launch con network commands habilitado
+- [x] stop con cleanup
+- [x] pause via UDP (PAUSE_TOGGLE)
+- [x] saveState/loadState via UDP
+- [x] status via UDP (GET_STATUS)
+- [x] Gestión de handles
+- [x] Integrado con comandos Tauri
 
-### Adapters TypeScript
+**edenAdapter.ts**
+- [x] EmulatorAdapter para Eden
+- [x] launch normal (sin IPC)
+- [x] stop via process kill
+- [x] pause: NO SOPORTADO (documentado)
+- [x] saveState/loadState: NO SOPORTADO (documentado)
+- [x] status via process check (running/not_running)
+- [x] Gestión básica de proceso
+- [x] EDEN_LIMITATIONS documentado
 
-**retroarchAdapter.ts** - FALTA CREAR
-- [ ] EmulatorAdapter para RetroArch
-- [ ] launch con network commands habilitado
-- [ ] stop con cleanup
-- [ ] pause via UDP (PAUSE_TOGGLE)
-- [ ] saveState/loadState via UDP
-- [ ] status via UDP (GET_STATUS)
-- [ ] Gestión de handles
+**resolveControlAdapter.ts**
+- [x] Usar adapters reales en lugar de fake cuando ipcEnabled=true
+- [x] PCSX2: createPcsx2Adapter() si managed
+- [x] RetroArch: createRetroarchAdapter() si managed
+- [x] Eden: createEdenAdapter() si managed
+- [x] Fallback a fake si manual o error
+- [x] Retorna: kind, capabilities, ipcEnabled, adapter
 
-**edenAdapter.ts** - FALTA CREAR
-- [ ] EmulatorAdapter para Eden
-- [ ] launch normal (sin IPC)
-- [ ] stop via process kill
-- [ ] pause: NO SOPORTADO (documentar)
-- [ ] saveState/loadState: NO SOPORTADO (documentar)
-- [ ] status via process check (running/not_running)
-- [ ] Gestión básica de proceso
+**emulatorConfigService.ts**
+- [x] Servicio para leer/escribir configuración desde UI
+- [x] `getEmulatorConfigCapabilities(runtimeKind)`
+- [x] `getDefaultEmulatorConfig(runtimeKind)`
+- [x] `applyEmulatorConfig(configPath, config)`
+- [x] `ensureEmulatorConfigured(runtimeType, configPath)`
+- [x] Helpers: getEmulatorRuntimeKind
+- [x] Constantes: DEFAULT_CONFIG_VALUES, RENDERER_OPTIONS, etc.
 
-### Integración
-
-**resolveControlAdapter.ts** - ACTUALIZAR
-- [ ] Usar adapters reales en lugar de fake cuando ipcEnabled=true
-- [ ] PCSX2: createPcsx2Adapter() si managed
-- [ ] RetroArch: createRetroarchAdapter() si managed
-- [ ] Eden: createEdenAdapter() si managed
-- [ ] Fallback a fake si manual o error
-
-**Configuración automática** - SERVICIOS TS
-- [ ] Servicio para leer/escribir configuración desde UI
-- [ ] `emulatorConfigService.ts`:
-  - getConfig(runtimeId)
-  - saveConfig(runtimeId, config)
-  - getCapabilities(runtimeId)
-  - getDefaults(runtimeId)
-- [ ] UI en Settings para editar perfiles
-- [ ] Aplicar config antes del primer launch
+## 🚧 Pendiente (Próximos pasos)
 
 ### Pre-launch Config
 
@@ -108,6 +107,33 @@
   - Si no, aplicar defaults
   - Llamar antes de launch
 - [ ] Integrar con `prepare_runtime_launch`
+
+### UI de Settings
+
+**Componente de configuración de emuladores** - CREAR
+- [ ] Vista/modal para editar perfiles por emulador
+- [ ] Formulario con todas las opciones:
+  - Resolución (dropdown)
+  - Renderer (dropdown)
+  - VSync (checkbox)
+  - Audio engine (dropdown)
+  - Volumen (slider)
+  - Idioma UI (dropdown)
+  - Mostrar FPS (checkbox)
+- [ ] Guardar cambios con `applyEmulatorConfig`
+- [ ] Preview de cambios antes de aplicar
+
+### Testing
+
+**Unit tests con fake transport**
+- [x] Fake adapters ya funcionan (sin cambios)
+- [ ] Tests para adapters reales (mocking Tauri invoke)
+
+**Integration tests en Windows**
+- [ ] Verificar PCSX2 PINE en proceso real
+- [ ] Verificar RetroArch UDP en proceso real
+- [ ] Verificar Eden process check
+- [ ] Verificar configuración automática aplicada
 
 ## 📋 Capacidades Documentadas
 
