@@ -288,17 +288,36 @@ fn emit_download_progress(
 }
 
 /// Valida que una ruta esté dentro de un directorio permitido (anti path-traversal).
+/// IMPORTANTE: Rechaza componentes ".." explícitamente para evitar bypass cuando canonicalize falla.
 pub fn ensure_path_within(
     path: &Path,
     allowed_parent: &Path,
 ) -> Result<(), SecureDownloadError> {
+    // 1. Rechazar componentes ".." explícitamente (ataque path traversal)
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(SecureDownloadError::Io(format!(
+                "Ruta contiene '..' (path traversal): {}",
+                path.display()
+            )));
+        }
+    }
+    
+    // 2. Normalizar y validar que esté dentro del padre permitido
     let canonical_parent = allowed_parent
         .canonicalize()
         .unwrap_or_else(|_| allowed_parent.to_path_buf());
     
-    let canonical_path = path
+    // Si la ruta no existe, construir la ruta absoluta manualmente
+    let absolute_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        canonical_parent.join(path)
+    };
+    
+    let canonical_path = absolute_path
         .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
+        .unwrap_or_else(|_| absolute_path.clone());
     
     if !canonical_path.starts_with(&canonical_parent) {
         return Err(SecureDownloadError::Io(format!(
@@ -314,6 +333,51 @@ pub fn ensure_path_within(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_ensure_path_within_rejects_parent_dir() {
+        let temp = std::env::temp_dir();
+        
+        // Intentar path traversal con ..
+        let evil_path = PathBuf::from("catalog-games/../evil.exe");
+        let result = ensure_path_within(&evil_path, &temp);
+        assert!(
+            result.is_err(),
+            "Debe rechazar rutas con .. (path traversal)"
+        );
+        
+        // Variantes
+        let evil_path2 = PathBuf::from("subdir/../../evil.exe");
+        assert!(
+            ensure_path_within(&evil_path2, &temp).is_err(),
+            "Debe rechazar múltiples .."
+        );
+        
+        let evil_path3 = PathBuf::from("./../../evil.exe");
+        assert!(
+            ensure_path_within(&evil_path3, &temp).is_err(),
+            "Debe rechazar . y .."
+        );
+    }
+
+    #[test]
+    fn test_ensure_path_within_allows_safe_paths() {
+        let temp = std::env::temp_dir();
+        
+        let safe_path = PathBuf::from("catalog-games/game.iso");
+        let result = ensure_path_within(&safe_path, &temp);
+        assert!(
+            result.is_ok(),
+            "Debe permitir rutas seguras sin .."
+        );
+        
+        let safe_path2 = PathBuf::from("subdir/file.bin");
+        assert!(
+            ensure_path_within(&safe_path2, &temp).is_ok(),
+            "Debe permitir subdirectorios normales"
+        );
+    }
 
     #[test]
     fn test_host_matching_exact() {

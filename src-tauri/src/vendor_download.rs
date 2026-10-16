@@ -6,6 +6,7 @@
 //! Cada item: { kind, downloadUrl, fileSizeBytes, fileName, sha256, expiresAt? }
 
 use crate::secure_download::{ensure_path_within, secure_download_file, SecureDownloadError};
+use crate::emulator_data::sanitize_bios_file_name;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -124,6 +125,10 @@ pub async fn download_vendor_asset(
     sha256: String,
     size_bytes: String,
 ) -> Result<(), VendorDownloadError> {
+    // Validar fileName (evitar path traversal, C:foo en Windows, etc)
+    let safe_file_name = sanitize_bios_file_name(&file_name)
+        .ok_or_else(|| VendorDownloadError::Io(format!("Nombre de archivo inválido: {}", file_name)))?;
+    
     let size: u64 = size_bytes
         .parse()
         .map_err(|_| VendorDownloadError::Io("Tamaño inválido".into()))?;
@@ -158,15 +163,15 @@ pub async fn download_vendor_asset(
     // Validar que el destino esté dentro de AppData de Blaze
     ensure_path_within(&dest_dir, &app.path().app_data_dir().unwrap_or_default())?;
 
-    // Detectar formato por fileName o URL
-    let archive_format = detect_archive_format(&url, &file_name);
+    // Detectar formato por safe_file_name (ya validado) o URL
+    let archive_format = detect_archive_format(&url, &safe_file_name);
 
     if let Some(format) = archive_format {
         // Extraer archivo comprimido
         extract_vendor_archive(&temp_file, &dest_dir, format)?;
     } else {
-        // Copiar archivo directamente con su nombre real
-        let dest_file = dest_dir.join(&file_name);
+        // Copiar archivo directamente con su nombre real (ya validado)
+        let dest_file = dest_dir.join(&safe_file_name);
         fs::copy(&temp_file, &dest_file)
             .map_err(|e| VendorDownloadError::Io(e.to_string()))?;
     }
