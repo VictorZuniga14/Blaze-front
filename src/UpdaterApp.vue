@@ -17,13 +17,12 @@ const progress = ref<UpdateProgress>({
 const cancelled = ref(false);
 const busy = ref(true);
 let unlistenClose: (() => void) | undefined;
-let handingOff = false;
-/** Permite que close() del handoff no sea bloqueado por onCloseRequested. */
+/** Permite que close()/hide() del handoff no sea bloqueado por onCloseRequested. */
 let allowWindowClose = false;
+let handoffPromise: Promise<void> | null = null;
 
 const canCancel = computed(
   () =>
-    busy.value &&
     !cancelled.value &&
     progress.value.phase !== "installing" &&
     progress.value.phase !== "done",
@@ -45,11 +44,16 @@ const indeterminate = computed(
 );
 
 async function handoffOnce(): Promise<void> {
-  if (handingOff) return;
-  handingOff = true;
-  busy.value = false;
   allowWindowClose = true;
-  await handoffToMainWindow();
+  busy.value = false;
+  if (!handoffPromise) {
+    handoffPromise = handoffToMainWindow().catch((error) => {
+      console.info("[Blaze] Handoff updater→main:", error);
+      // Permitir reintentar si falló.
+      handoffPromise = null;
+    });
+  }
+  await handoffPromise;
 }
 
 async function cancel(): Promise<void> {
@@ -78,7 +82,7 @@ onMounted(() => {
           event.preventDefault();
           return;
         }
-        // X del usuario: abrir main y cerrar updater (mismo handoff).
+        // X del usuario: mismo handoff que Cancelar.
         cancelled.value = true;
         event.preventDefault();
         await handoffOnce();

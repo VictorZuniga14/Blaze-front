@@ -15,9 +15,12 @@ export type UpdateProgress = {
 
 export type RunUpdaterOptions = {
   onProgress?: (p: UpdateProgress) => void;
-  /** Si devuelve true, no se relanza tras instalar. */
+  /** Si devuelve true, abortar check/descarga y no relanzar. */
   shouldAbort?: () => boolean;
 };
+
+const CHECK_TIMEOUT_MS = 10_000;
+const ABORT_ERR = "UPDATE_ABORTED";
 
 function emit(
   onProgress: RunUpdaterOptions["onProgress"],
@@ -26,21 +29,39 @@ function emit(
   onProgress?.(progress);
 }
 
-/**
- * Cierra el modal de actualización y recién después muestra la app.
- * Orden fijo: updater off → main on (nunca las dos a la vez).
- * El caller debe armar el flag que permite close() (ver UpdaterApp).
- */
-export async function handoffToMainWindow(): Promise<void> {
-  try {
-    const current = getCurrentWindow();
-    if (current.label === "updater") {
-      await current.close();
+async function closeUpdaterWindow(): Promise<void> {
+  const tryClose = async (win: {
+    hide: () => Promise<void>;
+    close: () => Promise<void>;
+  }) => {
+    try {
+      await win.hide();
+    } catch {
+      /* ignore */
     }
+    try {
+      await win.close();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  try {
+    const byLabel = await WebviewWindow.getByLabel("updater");
+    if (byLabel) await tryClose(byLabel);
   } catch {
-    /* ya cerrada */
+    /* ignore */
   }
 
+  try {
+    const current = getCurrentWindow();
+    if (current.label === "updater") await tryClose(current);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function showMainWindow(): Promise<void> {
   try {
     const main = await WebviewWindow.getByLabel("main");
     if (main) {
@@ -51,6 +72,20 @@ export async function handoffToMainWindow(): Promise<void> {
   } catch (error) {
     console.info("[Blaze] No se pudo mostrar main:", error);
   }
+}
+
+/**
+ * Muestra la app y destruye el modal updater (main primero para no dejar zombie).
+ * El caller debe armar el flag que permite close() (ver UpdaterApp).
+ */
+export async function handoffToMainWindow(): Promise<void> {
+  await showMainWindow();
+  // Pequeña pausa para que Windows registre el foco en main antes de matar updater.
+  await new Promise((r) => setTimeout(r, 50));
+  await closeUpdaterWindow();
+  // Segundo intento por si el primer close quedó bloqueado por onCloseRequested.
+  await new Promise((r) => setTimeout(r, 100));
+  await closeUpdaterWindow();
 }
 
 /**
@@ -68,6 +103,8 @@ export async function runExternalUpdaterFlow(
     return "skipped";
   }
 
+  const aborted = () => Boolean(shouldAbort?.());
+
   emit(onProgress, {
     phase: "checking",
     percent: null,
@@ -75,6 +112,8 @@ export async function runExternalUpdaterFlow(
     totalBytes: null,
     detail: "Buscando actualizaciones…",
   });
+
+  if (aborted()) return "skipped";
 
   let update: Update | null = null;
   try {
@@ -84,7 +123,7 @@ export async function runExternalUpdaterFlow(
       new Promise<null>((_, reject) => {
         window.setTimeout(
           () => reject(new Error("Timeout buscando actualizaciones")),
-          12_000,
+          CHECK_TIMEOUT_MS,
         );
       }),
     ]);
@@ -93,12 +132,16 @@ export async function runExternalUpdaterFlow(
     return "skipped";
   }
 
-  if (!update) {
+  if (aborted()) {
+    try {
+      await update?.close();
+    } catch {
+      /* ignore */
+    }
     return "skipped";
   }
 
-  if (shouldAbort?.()) {
-    await update.close();
+  if (!update) {
     return "skipped";
   }
 
@@ -116,7 +159,9 @@ export async function runExternalUpdaterFlow(
 
   try {
     await update.downloadAndInstall((event: DownloadEvent) => {
-      if (shouldAbort?.()) return;
+      if (aborted()) {
+        throw new Error(ABORT_ERR);
+      }
 
       switch (event.event) {
         case "Started": {
@@ -148,6 +193,10 @@ export async function runExternalUpdaterFlow(
           break;
         }
         case "Finished": {
+          // Si el usuario canceló, no seguir a "installing" en UI.
+          if (aborted()) {
+            throw new Error(ABORT_ERR);
+          }
           emit(onProgress, {
             phase: "installing",
             version: update.version,
@@ -161,7 +210,13 @@ export async function runExternalUpdaterFlow(
       }
     });
   } catch (error) {
-    if (shouldAbort?.()) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (aborted() || msg.includes(ABORT_ERR)) {
+      try {
+        await update.close();
+      } catch {
+        /* ignore */
+      }
       return "skipped";
     }
     console.info("[Blaze] Falló la actualización:", error);
@@ -173,7 +228,12 @@ export async function runExternalUpdaterFlow(
     return "skipped";
   }
 
-  if (shouldAbort?.()) {
+  if (aborted()) {
+    try {
+      await update.close();
+    } catch {
+      /* ignore */
+    }
     return "skipped";
   }
 
