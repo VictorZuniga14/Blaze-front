@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { VendorAsset, VendorAssetKind } from "../types/vendor";
-import { fetchVendorManifest, findAssetByKind, getAssetSizeBytes } from "./vendorApi.service";
+import { fetchVendorManifest, findAssetsByKind, getAssetSizeBytes } from "./vendorApi.service";
 import { mapBackendKindToInternal } from "../types/vendor";
 
 export type VendorOnboardingProgress = {
@@ -87,16 +87,19 @@ export async function downloadAndInstallVendorAssets(
     ];
 
     for (const { kind, required } of assetsToDownload) {
-      const asset = findAssetByKind(manifest, kind);
+      const assets = findAssetsByKind(manifest, kind);
       
-      if (!asset) {
+      if (assets.length === 0) {
         if (required) {
           throw new Error(`Asset requerido no disponible en el manifiesto: ${kind}`);
         }
         continue;
       }
 
-      await downloadAndInstallAsset(asset, onProgress);
+      // Descargar e instalar TODOS los assets de este kind
+      for (const asset of assets) {
+        await downloadAndInstallAsset(asset, onProgress);
+      }
     }
 
     onProgress?.({

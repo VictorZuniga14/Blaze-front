@@ -32,7 +32,19 @@ export async function fetchVendorManifest(): Promise<VendorManifest> {
 }
 
 /**
- * Busca un asset por kind en el manifiesto.
+ * Busca todos los assets de un kind en el manifiesto.
+ * IMPORTANTE: Puede haber múltiples assets del mismo kind (ej: múltiples BIOS, keys, firmware).
+ */
+export function findAssetsByKind(
+  manifest: VendorManifest,
+  kind: VendorAssetKind
+): VendorAsset[] {
+  return manifest.items.filter(a => a.kind === kind);
+}
+
+/**
+ * Busca el primer asset de un kind en el manifiesto.
+ * @deprecated Usar findAssetsByKind para soportar múltiples assets del mismo kind.
  */
 export function findAssetByKind(
   manifest: VendorManifest,
