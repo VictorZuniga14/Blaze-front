@@ -280,9 +280,23 @@ Verificar que SOLO estos hosts son permitidos:
 - `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`
 - `buildbot.libretro.com`
 - `git.eden-emu.dev`
-- `*.r2.dev` (Cloudflare R2 para assets vendor)
+- `*.r2.cloudflarestorage.com` (Cloudflare R2 para assets vendor - URLs presignadas)
+- `*.r2.dev` (Cloudflare R2 public domains - opcional)
+
+**URLs presignadas de R2:** El backend firma las URLs con el endpoint de Cloudflare R2:
+```
+https://<ACCOUNT_ID>.r2.cloudflarestorage.com/path/to/file?X-Amz-Algorithm=...
+```
 
 Intentar descargar desde otro host debe fallar con "Host no permitido".
+
+**Tests de matching:**
+- ✅ `abc123.r2.cloudflarestorage.com` → permitido
+- ✅ `pub-xyz.r2.dev` → permitido
+- ❌ `evil.com` → rechazado
+- ❌ `not-r2.cloudflarestorage.com` → rechazado (no termina en `.r2.cloudflarestorage.com`)
+- ❌ `r2.cloudflarestorage.com` → rechazado (sin subdomain)
+- ❌ HTTP → rechazado (solo HTTPS)
 
 ### Verificación de archivos Eden
 
@@ -310,8 +324,10 @@ Si algo falla críticamente:
 - ✅ Sin mocks ni fallbacks en release
 
 ### Seguridad mejorada
-- ✅ Límite 200 MB por asset (vs 50 MB antes)
-- ✅ Wildcard `*.r2.dev` para URLs de R2
+- ✅ Límite 500 MB por asset (alineado con backend)
+- ✅ Wildcard `*.r2.cloudflarestorage.com` (URLs presignadas del backend)
+- ✅ Wildcard `*.r2.dev` (dominios públicos opcionales)
+- ✅ Matching estricto: requiere subdomain válido
 - ✅ Detección de formato por fileName (evita problemas con query params)
 - ✅ Archivos guardados con nombre real
 - ✅ Destino AppData (no Resources)
@@ -320,6 +336,12 @@ Si algo falla críticamente:
 - ✅ Eden keys verificados: `prod.keys` >32 bytes
 - ✅ Eden firmware verificado: archivos `.nca` presentes
 - ❌ Sin placeholders ni "asumir listo"
+
+### Compilación y tests
+- ✅ `cargo check`: PASSED (solo warnings de unused vars)
+- ✅ `cargo test secure_download`: 7/7 tests passing
+- ✅ TypeScript compila sin errores
+- ✅ Dependencias del sistema instaladas (Linux)
 
 ## Checklist de pruebas
 
