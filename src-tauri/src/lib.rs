@@ -8,6 +8,10 @@ mod emulator_data;
 mod eden_nsp_install;
 mod eden_config;
 mod runtime_install;
+mod secure_download;
+mod vendor_download;
+mod emulator_transport;
+mod emulator_full_config;
 
 use catalog_transfer::{
     catalog_games_dir, extract_catalog_zip, extract_zip_archive, http_download_file,
@@ -24,7 +28,7 @@ use emulator_data::{
     apply_managed_ra_credentials, import_eden_firmware_zip, initialize_emulator_data,
     import_pcsx2_bios, install_eden_title_nsps, open_managed_eden_keys_folder,
     open_managed_pcsx2_bios_folder, pcsx2_managed_bios_present, prepare_runtime_launch,
-    retroarch_ps1_bios_present,
+    retroarch_ps1_bios_present, eden_keys_present, eden_firmware_present,
 };
 use eden_config::{
     launch_eden_config_ui, launch_runtime_config_ui, list_audio_output_devices,
@@ -35,6 +39,15 @@ use eden_config::{
 use runtime_install::{
     cancel_runtime_install, install_runtime, runtime_cores_status, runtime_manifest_ids,
     runtime_manifest_list,
+};
+use vendor_download::download_vendor_asset_command;
+use emulator_transport::{
+    emulator_transport_send, emulator_transport_probe_retroarch,
+    emulator_transport_check_process,
+};
+use emulator_full_config::{
+    get_emulator_config_capabilities, get_default_emulator_config,
+    apply_emulator_config,
 };
 use std::sync::Arc;
 use tauri::{
@@ -92,6 +105,8 @@ pub fn run() {
             open_managed_pcsx2_bios_folder,
             pcsx2_managed_bios_present,
             retroarch_ps1_bios_present,
+            eden_keys_present,
+            eden_firmware_present,
             open_managed_eden_keys_folder,
             import_eden_firmware_zip,
             install_eden_title_nsps,
@@ -107,7 +122,14 @@ pub fn run() {
             read_runtime_video_settings,
             write_runtime_video_settings,
             launch_runtime_config_ui,
-            reveal_path_in_explorer
+            reveal_path_in_explorer,
+            download_vendor_asset_command,
+            emulator_transport_send,
+            emulator_transport_probe_retroarch,
+            emulator_transport_check_process,
+            get_emulator_config_capabilities,
+            get_default_emulator_config,
+            apply_emulator_config
         ])
         .setup(|app| {
             #[cfg(desktop)]

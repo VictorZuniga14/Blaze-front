@@ -35,10 +35,10 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:* https://*; font-src 'self' data:",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": ["resources/**"]
       }
     }
   },
@@ -54,10 +54,9 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/pcsx2/**/*",
-      "resources/retroarch/**/*",
-      "resources/eden/**/*",
-      "resources/emulators/packs/**/*"
+      "resources/pcsx2/.gitkeep",
+      "resources/retroarch/.gitkeep",
+      "resources/eden/.gitkeep"
     ],
     "windows": {
       "nsis": {

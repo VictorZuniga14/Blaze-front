@@ -1,8 +1,7 @@
 # Publica el instalador Blaze (Windows NSIS) al pushear un tag v* o desde Actions.
-# Requisito: Release fijo "vendor" con:
-#   bios.7z + eden-keys.7z + eden-firmware.7z + eden.7z
-#   (PCSX2/RetroArch se descargan en runtime desde el manifiesto; no van en vendor/packs)
-# bios / keys / firmware se extraen a resources/ y van en el instalador.
+# El instalador es mínimo (~200 MB): solo el front Tauri + estructura de carpetas.
+# Todos los emuladores (PCSX2, RetroArch, Eden) y assets vendor (BIOS/keys/firmware)
+# se descargan en runtime en la pantalla 'Preparando Blaze...' tras el primer login.
 
 name: Release
 
@@ -67,79 +66,26 @@ jobs:
           $cargo = $cargo -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$ver`""
           Set-Content src-tauri/Cargo.toml -Value $cargo -Encoding utf8
 
-      - name: Download vendor packs (Release tag vendor)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verificar estructura de recursos
         shell: pwsh
         run: |
-          $packs = "src-tauri/resources/emulators/packs"
-          $bios = "src-tauri/resources/pcsx2/bios"
-          $edenKeys = "src-tauri/resources/eden/keys"
-          $edenFw = "src-tauri/resources/eden/nand/system/Contents/registered"
-          $tmp = "_vendor"
-          New-Item -ItemType Directory -Force -Path $packs, $bios, $edenKeys, $edenFw, $tmp | Out-Null
-
-          gh release download vendor --repo "${{ github.repository }}" --dir $tmp
-          if ($LASTEXITCODE -ne 0) {
-            throw "Falta el Release 'vendor'. Crealo una vez y volvé a correr el Action."
-          }
-
+          # Ya no empaquetamos ningún emulador en el instalador.
+          # Todos los emuladores (PCSX2, RetroArch, Eden) se descargan en runtime.
+          # Solo verificamos que existan las carpetas .gitkeep para el bundle.
+          
           $required = @(
-            "bios.7z",
-            "eden-keys.7z",
-            "eden-firmware.7z"
+            "src-tauri/resources/pcsx2/.gitkeep",
+            "src-tauri/resources/retroarch/.gitkeep",
+            "src-tauri/resources/eden/.gitkeep"
           )
-          foreach ($name in $required) {
-            $src = Join-Path $tmp $name
-            if (-not (Test-Path $src)) { throw "En Release vendor falta: $name" }
-          }
-          # Runtime Eden offline (obligatorio para Switch sin red a git.eden-emu.dev).
-          $edenRt = Join-Path $tmp "eden.7z"
-          if (-not (Test-Path $edenRt)) {
-            throw "En Release vendor falta: eden.7z"
-          }
-          Copy-Item $edenRt (Join-Path $packs "eden.7z") -Force
-
-          # JSON de vendor si existen (opcionales). pcsx2/retroarch ya no van en packs/.
-          Get-ChildItem $tmp -Filter "*.blaze-bundle.json" -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -notmatch '^(pcsx2|retroarch)\.blaze-bundle\.json$' } |
-            ForEach-Object { Copy-Item $_.FullName $packs -Force }
-
-          # Siempre generar/actualizar blaze-bundle.json desde el .7z real + versión del manifiesto.
-          # Sin este archivo hermano, Blaze ignora el pack offline y baja por URL (falla Eden).
-          $manifest = Get-Content "src-tauri/runtimes.manifest.json" -Raw | ConvertFrom-Json
-          foreach ($id in @("eden")) {
-            $archive = Join-Path $packs "$id.7z"
-            if (-not (Test-Path $archive)) {
-              throw "Falta pack offline tras copiar vendor: $id.7z"
+          
+          foreach ($file in $required) {
+            if (-not (Test-Path $file)) {
+              throw "Falta archivo requerido: $file"
             }
-            $entry = $manifest.runtimes | Where-Object { $_.id -eq $id }
-            if (-not $entry) { throw "Falta $id en runtimes.manifest.json" }
-            $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-            $meta = @{ version = [string]$entry.version; sha256 = $hash } | ConvertTo-Json
-            $metaPath = Join-Path $packs "$id.blaze-bundle.json"
-            Set-Content -LiteralPath $metaPath -Value $meta -Encoding utf8
-            Write-Host "bundle meta $id → version=$($entry.version) sha256=$hash"
           }
-
-          function Expand-Vendor7z([string]$Archive, [string]$OutDir, [string]$Label) {
-            Write-Host "Extrayendo $Label → $OutDir ..."
-            if (Get-Command 7z -ErrorAction SilentlyContinue) {
-              & 7z x $Archive "-o$OutDir" -y | Out-Null
-            } else {
-              if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
-                choco install 7zip.install -y --no-progress
-              }
-              & "C:\Program Files\7-Zip\7z.exe" x $Archive "-o$OutDir" -y | Out-Null
-            }
-            $n = @(Get-ChildItem $OutDir -File -Recurse -ErrorAction SilentlyContinue).Count
-            if ($n -lt 1) { throw "$Label no dejó archivos en $OutDir" }
-            Write-Host "${Label}: $n archivo(s)"
-          }
-
-          Expand-Vendor7z (Join-Path $tmp "bios.7z") $bios "bios.7z"
-          Expand-Vendor7z (Join-Path $tmp "eden-keys.7z") $edenKeys "eden-keys.7z"
-          Expand-Vendor7z (Join-Path $tmp "eden-firmware.7z") $edenFw "eden-firmware.7z"
+          
+          Write-Host "Estructura de recursos verificada. Instalador será mínimo (~200 MB)."
 
       - name: Setup Node
         uses: actions/setup-node@v4
