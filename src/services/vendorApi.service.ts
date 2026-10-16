@@ -57,9 +57,6 @@ export function findAssetByKind(
  * Verifica si una URL de asset ha expirado.
  */
 export function isAssetUrlExpired(asset: VendorAsset): boolean {
-  if (!asset.expiresAt) {
-    return false; // Sin expiración
-  }
   return new Date(asset.expiresAt) < new Date();
 }
 

@@ -3,6 +3,16 @@
  * GET /api/vendor/manifest con Bearer devuelve esta estructura.
  * 
  * Referencia: Blaze-back PR #1, rama cursor/vendor-assets-b423
+ * 
+ * Campos requeridos según contrato:
+ * - id: Identificador único del asset
+ * - kind: Tipo de asset
+ * - name: Nombre descriptivo
+ * - fileName: Nombre del archivo físico
+ * - fileSizeBytes: Tamaño en bytes (string)
+ * - sha256: Hash SHA256 del archivo
+ * - downloadUrl: URL presignada de descarga (R2/S3)
+ * - expiresAt: Timestamp de expiración de la URL (ISO 8601) - REQUERIDO
  */
 
 export type VendorAssetKind = 
@@ -13,18 +23,22 @@ export type VendorAssetKind =
   | "other";
 
 export interface VendorAsset {
+  /** ID único del asset en el backend */
+  id: string;
   /** Tipo de asset */
   kind: VendorAssetKind;
-  /** URL presignada de descarga (R2/S3) */
-  downloadUrl: string;
-  /** Tamaño en bytes (string) */
-  fileSizeBytes: string;
+  /** Nombre descriptivo del asset (ej: "PS2 BIOS USA v2.30") */
+  name: string;
   /** Nombre del archivo (ej: "SCPH1001.bin", "prod.keys") */
   fileName: string;
+  /** Tamaño en bytes (string) */
+  fileSizeBytes: string;
   /** Hash SHA256 del archivo */
   sha256: string;
-  /** Timestamp de expiración de la URL (ISO 8601) */
-  expiresAt?: string;
+  /** URL presignada de descarga (R2/S3) */
+  downloadUrl: string;
+  /** Timestamp de expiración de la URL (ISO 8601) - REQUERIDO */
+  expiresAt: string;
 }
 
 export interface VendorManifest {
