@@ -18,6 +18,7 @@ const ALLOWED_HOSTS: &[&str] = &[
     "release-assets.githubusercontent.com",
     "buildbot.libretro.com",
     "git.eden-emu.dev",
+    "stable.eden-emu.dev",
 ];
 
 // Patrones wildcard para hosts dinámicos (fallback cuando no hay host exacto configurado)
@@ -400,6 +401,12 @@ mod tests {
 
         let url = reqwest::Url::parse("https://buildbot.libretro.com/test").unwrap();
         assert!(host_allowed(&url), "buildbot.libretro.com debe estar permitido");
+
+        let url = reqwest::Url::parse("https://stable.eden-emu.dev/v0.2.1/x.zip").unwrap();
+        assert!(host_allowed(&url), "stable.eden-emu.dev debe estar permitido");
+
+        let url = reqwest::Url::parse("https://git.eden-emu.dev/eden-emu/eden/releases/x.zip").unwrap();
+        assert!(host_allowed(&url), "git.eden-emu.dev debe estar permitido");
     }
 
     #[test]

@@ -24,6 +24,7 @@ const ALLOWED_HOSTS: &[&str] = &[
     "release-assets.githubusercontent.com",
     "buildbot.libretro.com",
     "git.eden-emu.dev",
+    "stable.eden-emu.dev",
 ];
 
 /// Windows `FILE_ATTRIBUTE_REPARSE_POINT` — usado por 7z para marcar symlinks.
@@ -1741,6 +1742,10 @@ mod tests {
         .is_ok());
         assert!(validate_url(
             "https://git.eden-emu.dev/eden-emu/eden/releases/download/v0.2.1/Eden-Windows-v0.2.1-amd64-msvc-standard.zip"
+        )
+        .is_ok());
+        assert!(validate_url(
+            "https://stable.eden-emu.dev/v0.2.1/Eden-Windows-v0.2.1-amd64-msvc-standard.zip"
         )
         .is_ok());
     }

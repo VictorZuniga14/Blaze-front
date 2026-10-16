@@ -69,7 +69,7 @@
     {
       "id": "eden",
       "version": "0.2.1",
-      "url": "https://git.eden-emu.dev/eden-emu/eden/releases/download/v0.2.1/Eden-Windows-v0.2.1-amd64-msvc-standard.zip",
+      "url": "https://stable.eden-emu.dev/v0.2.1/Eden-Windows-v0.2.1-amd64-msvc-standard.zip",
       "sha256": "ff498e5da9630216926ac3cbe9fb493b14930665c728a40a8f5b59507fdd7ebf",
       "hash_origin": "computed-locally",
       "archive": "zip",
@@ -79,7 +79,7 @@
       "max_download_bytes": 67108864,
       "max_extract_bytes": 268435456,
       "max_extract_entries": 2000,
-      "_comment": "Keys/firmware no van en este pack. Offline opcional: resources/emulators/packs/eden.7z o carpeta resources/emulators/eden/."
+      "_comment": "URL directa CDN (git.eden-emu.dev solo hace 303 → aquí). Keys/firmware no van en este pack."
     }
   ]
 }
