@@ -421,15 +421,6 @@ mod tests {
     }
 
     #[test]
-    fn test_host_matching_wildcard_r2_dev() {
-        let url = reqwest::Url::parse("https://pub-xyz.r2.dev/file.bin").unwrap();
-        assert!(
-            host_allowed(&url),
-            "*.r2.dev debe estar permitido (dominios públicos)"
-        );
-    }
-
-    #[test]
     fn test_host_not_allowed() {
         let url = reqwest::Url::parse("https://evil.com/malware.exe").unwrap();
         assert!(
@@ -494,10 +485,10 @@ mod tests {
         // Simular host exacto configurado
         env::set_var("BLAZE_R2_HOST", "abc123.r2.cloudflarestorage.com");
         
-        let url = validate_url("https://abc123.r2.cloudflarestorage.com/file.bin").unwrap();
+        let url = reqwest::Url::parse("https://abc123.r2.cloudflarestorage.com/file.bin").unwrap();
         assert!(host_allowed(&url), "Host exacto configurado debe ser permitido");
         
-        let url2 = validate_url("https://otro.r2.cloudflarestorage.com/file.bin").unwrap();
+        let url2 = reqwest::Url::parse("https://otro.r2.cloudflarestorage.com/file.bin").unwrap();
         assert!(!host_allowed(&url2), "Otras cuentas R2 NO deben ser permitidas cuando hay host exacto");
         
         env::remove_var("BLAZE_R2_HOST");
@@ -508,7 +499,7 @@ mod tests {
         // Sin BLAZE_R2_HOST configurado, el wildcard actúa como fallback
         env::remove_var("BLAZE_R2_HOST");
         
-        let url = validate_url("https://cualquier.r2.cloudflarestorage.com/file.bin").unwrap();
+        let url = reqwest::Url::parse("https://cualquier.r2.cloudflarestorage.com/file.bin").unwrap();
         assert!(
             host_allowed(&url),
             "Con fallback, cualquier cuenta R2 es permitida (menos seguro)"
@@ -520,7 +511,7 @@ mod tests {
         // *.r2.dev debe estar bloqueado (quitado de allowlist)
         env::remove_var("BLAZE_R2_HOST");
         
-        let url = validate_url("https://cualquier.r2.dev/file.bin").unwrap();
+        let url = reqwest::Url::parse("https://cualquier.r2.dev/file.bin").unwrap();
         assert!(
             !host_allowed(&url),
             "*.r2.dev NO debe estar permitido"

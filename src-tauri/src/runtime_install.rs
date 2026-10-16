@@ -1992,9 +1992,17 @@ mod tests {
     }
 
     #[test]
-    fn sevenz_entry_path_rejects_traversal() {
+    #[cfg(windows)]
+    fn sevenz_entry_path_rejects_traversal_windows() {
+        // En Windows, backslashes son separadores de ruta
         assert!(strip_path(Path::new("..\\evil.bin"), 0).is_err());
+    }
+    
+    #[test]
+    fn sevenz_entry_path_rejects_traversal() {
+        // Tests independientes de plataforma: "/" siempre es separador
         assert!(strip_path(Path::new("nested/../../x.bin"), 0).is_err());
+        assert!(strip_path(Path::new("../evil.bin"), 0).is_err());
         let ok = strip_path(Path::new("RetroArch-Win64/cores/foo.dll"), 1).unwrap();
         assert_eq!(ok.unwrap(), PathBuf::from("cores/foo.dll"));
     }

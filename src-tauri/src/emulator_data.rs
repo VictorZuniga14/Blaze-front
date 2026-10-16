@@ -1695,13 +1695,40 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_bios_file_name_rejects_traversal() {
+    #[cfg(windows)]
+    fn sanitize_bios_file_name_rejects_traversal_windows() {
+        // En Windows, backslashes son separadores de ruta
         assert_eq!(
             sanitize_bios_file_name(r"C:\x\scph.bin").as_deref(),
             Some("scph.bin")
         );
-        assert!(sanitize_bios_file_name("..").is_none());
-        assert!(sanitize_bios_file_name("").is_none());
+    }
+    
+    #[test]
+    fn sanitize_bios_file_name_rejects_traversal() {
+        // Tests independientes de plataforma
+        assert!(sanitize_bios_file_name("..").is_none(), ".. debe rechazarse");
+        assert!(sanitize_bios_file_name("").is_none(), "empty debe rechazarse");
+        assert!(sanitize_bios_file_name(".").is_none(), ". debe rechazarse");
+        
+        // La función extrae el basename seguro, entonces "../evil.bin" → "evil.bin"
+        // y "dir/file.bin" → "file.bin". Esto es CORRECTO y esperado.
+        assert_eq!(
+            sanitize_bios_file_name("../evil.bin").as_deref(),
+            Some("evil.bin"),
+            "Debe extraer basename seguro"
+        );
+        assert_eq!(
+            sanitize_bios_file_name("dir/file.bin").as_deref(),
+            Some("file.bin"),
+            "Debe extraer basename seguro"
+        );
+        
+        // Nombres simples pasan
+        assert_eq!(
+            sanitize_bios_file_name("scph.bin").as_deref(),
+            Some("scph.bin")
+        );
     }
 
     #[test]
