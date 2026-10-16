@@ -4,6 +4,7 @@
 use futures_util::StreamExt;
 use reqwest;
 use sha2::{Digest, Sha256};
+use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,10 +20,10 @@ const ALLOWED_HOSTS: &[&str] = &[
     "git.eden-emu.dev",
 ];
 
-// Patrones wildcard para hosts dinámicos (ej: R2)
-const ALLOWED_HOST_PATTERNS: &[&str] = &[
-    "*.r2.cloudflarestorage.com",  // Cloudflare R2 storage (URLs presignadas)
-    "*.r2.dev",                     // Cloudflare R2 public domains (opcional)
+// Patrones wildcard para hosts dinámicos (fallback cuando no hay host exacto configurado)
+// ADVERTENCIA: Solo usar como fallback documentado. En producción configurar BLAZE_R2_HOST.
+const ALLOWED_HOST_PATTERNS_FALLBACK: &[&str] = &[
+    "*.r2.cloudflarestorage.com",  // Cloudflare R2 storage (URLs presignadas) - FALLBACK
 ];
 
 const DOWNLOAD_TIMEOUT_SECS: u64 = 60 * 60;
@@ -64,16 +65,29 @@ fn host_allowed(url: &reqwest::Url) -> bool {
     }
     match url.host_str() {
         Some(host) => {
-            // Primero intentar match exacto
+            // 1. Intentar match exacto con hosts estáticos
             if ALLOWED_HOSTS.contains(&host) {
                 return true;
             }
-            // Luego intentar patrones wildcard
-            for pattern in ALLOWED_HOST_PATTERNS {
-                if matches_wildcard_pattern(host, pattern) {
+            
+            // 2. Intentar host R2 exacto configurado (recomendado en producción)
+            if let Ok(r2_host) = env::var("BLAZE_R2_HOST") {
+                if !r2_host.is_empty() && host == r2_host {
                     return true;
                 }
             }
+            
+            // 3. Fallback: intentar patrones wildcard (solo si no hay host exacto configurado)
+            // ADVERTENCIA: Aceptar cualquier cuenta R2 es menos seguro.
+            // En producción, configurar BLAZE_R2_HOST con el host exacto (ej: "abc123.r2.cloudflarestorage.com")
+            if env::var("BLAZE_R2_HOST").is_err() {
+                for pattern in ALLOWED_HOST_PATTERNS_FALLBACK {
+                    if matches_wildcard_pattern(host, pattern) {
+                        return true;
+                    }
+                }
+            }
+            
             false
         }
         None => false,
@@ -464,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_validate_url_r2_presigned() {
-        // URL presignada realista
+        // URL presignada realista de R2
         let url_str = "https://abc123.r2.cloudflarestorage.com/blaze-vendor/switch_firmware.7z?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=abc/20261016/auto/s3/aws4_request&X-Amz-Date=20261016T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abcdef123456";
         
         let result = validate_url(url_str);
@@ -472,6 +486,44 @@ mod tests {
             result.is_ok(),
             "URL presignada de R2 debe ser válida: {:?}",
             result.err()
+        );
+    }
+    
+    #[test]
+    fn test_r2_exact_host_from_env() {
+        // Simular host exacto configurado
+        env::set_var("BLAZE_R2_HOST", "abc123.r2.cloudflarestorage.com");
+        
+        let url = validate_url("https://abc123.r2.cloudflarestorage.com/file.bin").unwrap();
+        assert!(host_allowed(&url), "Host exacto configurado debe ser permitido");
+        
+        let url2 = validate_url("https://otro.r2.cloudflarestorage.com/file.bin").unwrap();
+        assert!(!host_allowed(&url2), "Otras cuentas R2 NO deben ser permitidas cuando hay host exacto");
+        
+        env::remove_var("BLAZE_R2_HOST");
+    }
+    
+    #[test]
+    fn test_r2_fallback_when_not_configured() {
+        // Sin BLAZE_R2_HOST configurado, el wildcard actúa como fallback
+        env::remove_var("BLAZE_R2_HOST");
+        
+        let url = validate_url("https://cualquier.r2.cloudflarestorage.com/file.bin").unwrap();
+        assert!(
+            host_allowed(&url),
+            "Con fallback, cualquier cuenta R2 es permitida (menos seguro)"
+        );
+    }
+    
+    #[test]
+    fn test_r2_dev_blocked() {
+        // *.r2.dev debe estar bloqueado (quitado de allowlist)
+        env::remove_var("BLAZE_R2_HOST");
+        
+        let url = validate_url("https://cualquier.r2.dev/file.bin").unwrap();
+        assert!(
+            !host_allowed(&url),
+            "*.r2.dev NO debe estar permitido"
         );
     }
 }
