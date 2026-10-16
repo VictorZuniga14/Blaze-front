@@ -19,46 +19,38 @@ const ALLOWED_HOSTS: &[&str] = &[
     "git.eden-emu.dev",
 ];
 
-const DOWNLOAD_TIMEOUT_SECS: u64 = 60 * 60;
-const CONNECT_TIMEOUT_SECS: u64 = 30;
-const PROGRESS_EMIT_EVERY: u64 = 512 * 1024;
-
-#[derive(Debug)]
-pub enum SecureDownloadError {
-    Network(String),
-    HostNotAllowed(String),
-    HashMismatch { expected: String, got: String },
-    Cancelled,
-    Io(String),
-    TooLarge { kind: &'static str, limit: u64 },
-}
-
-impl SecureDownloadError {
-    pub fn to_user(&self) -> String {
-        match self {
-            Self::Network(m) => format!("Sin conexión o error de red: {m}"),
-            Self::HostNotAllowed(h) => format!("Host no permitido: {h}"),
-            Self::HashMismatch { expected, got } => {
-                format!(
-                    "El archivo descargado no coincide con el hash esperado (esperado {expected}, obtuvo {got})."
-                )
-            }
-            Self::Cancelled => "Descarga cancelada.".into(),
-            Self::Io(m) => format!("Error de disco: {m}"),
-            Self::TooLarge { kind, limit } => {
-                format!("{kind} supera el límite de {} bytes.", limit)
-            }
-        }
-    }
-}
+// Patrones wildcard para hosts dinámicos (ej: R2)
+const ALLOWED_HOST_PATTERNS: &[&str] = &[
+    "*.r2.dev",  // Cloudflare R2 storage
+];
 
 fn host_allowed(url: &reqwest::Url) -> bool {
     if url.scheme() != "https" {
         return false;
     }
     match url.host_str() {
-        Some(host) => ALLOWED_HOSTS.contains(&host),
+        Some(host) => {
+            // Primero intentar match exacto
+            if ALLOWED_HOSTS.contains(&host) {
+                return true;
+            }
+            // Luego intentar patrones wildcard
+            for pattern in ALLOWED_HOST_PATTERNS {
+                if matches_wildcard_pattern(host, pattern) {
+                    return true;
+                }
+            }
+            false
+        }
         None => false,
+    }
+}
+
+fn matches_wildcard_pattern(host: &str, pattern: &str) -> bool {
+    if let Some(suffix) = pattern.strip_prefix("*.") {
+        host.ends_with(suffix)
+    } else {
+        host == pattern
     }
 }
 

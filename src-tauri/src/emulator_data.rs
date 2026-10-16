@@ -866,6 +866,22 @@ pub fn retroarch_ps1_bios_present(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub fn eden_keys_present(app: AppHandle) -> Result<bool, String> {
+    let app_data = app_data_dir(&app)?;
+    let managed = managed_data_root(&app_data, "eden");
+    let keys_dir = eden_keys_dir(&managed);
+    Ok(has_eden_prod_keys(&keys_dir))
+}
+
+#[tauri::command]
+pub fn eden_firmware_present(app: AppHandle) -> Result<bool, String> {
+    let app_data = app_data_dir(&app)?;
+    let managed = managed_data_root(&app_data, "eden");
+    let fw_dir = eden_firmware_registered_dir(&managed);
+    Ok(has_eden_firmware(&fw_dir))
+}
+
+#[tauri::command]
 pub fn open_managed_pcsx2_bios_folder(app: AppHandle) -> Result<String, String> {
     let app_data = app_data_dir(&app)?;
     let datapath = managed_data_root(&app_data, "pcsx2");

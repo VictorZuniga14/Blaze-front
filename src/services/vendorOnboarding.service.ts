@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { VendorAsset, VendorAssetKind } from "../types/vendor";
-import { fetchVendorManifest, findAssetByKind } from "./vendorApi.service";
+import { fetchVendorManifest, findAssetByKind, getAssetSizeBytes } from "./vendorApi.service";
+import { mapBackendKindToInternal } from "../types/vendor";
 
 export type VendorOnboardingProgress = {
   phase: "downloading" | "extracting" | "verifying" | "done" | "error";
@@ -21,27 +22,24 @@ export type VendorOnboardingStatus = {
 
 /**
  * Verifica el estado de los assets vendor (BIOS, keys, firmware).
- * Usa comandos Tauri existentes para chequear archivos.
+ * Usa comandos Tauri existentes para chequear archivos REALES (no placeholders).
  */
 export async function checkVendorAssetStatus(): Promise<VendorOnboardingStatus> {
   try {
-    const [pcsx2Bios, ps1Bios] = await Promise.all([
+    const [pcsx2Bios, ps1Bios, edenKeys, edenFirmware] = await Promise.all([
       invoke<boolean>("pcsx2_managed_bios_present"),
       invoke<boolean>("retroarch_ps1_bios_present"),
+      invoke<boolean>("eden_keys_present"),
+      invoke<boolean>("eden_firmware_present"),
     ]);
 
-    // Para Eden, checkeamos archivos clave en las carpetas managed
-    // TODO: agregar comandos Tauri específicos si es necesario
-    const edenKeysReady = true; // Placeholder: asumir listo por ahora
-    const edenFirmwareReady = true; // Placeholder
-
-    const allReady = pcsx2Bios && ps1Bios && edenKeysReady && edenFirmwareReady;
+    const allReady = pcsx2Bios && ps1Bios && edenKeys && edenFirmware;
 
     return {
       pcsx2BiosReady: pcsx2Bios,
       retroarchPs1BiosReady: ps1Bios,
-      edenKeysReady,
-      edenFirmwareReady,
+      edenKeysReady: edenKeys,
+      edenFirmwareReady: edenFirmware,
       allReady,
     };
   } catch (error) {
@@ -61,8 +59,8 @@ export async function checkVendorAssetStatus(): Promise<VendorOnboardingStatus> 
  * Descarga e instala todos los assets vendor necesarios.
  * Reporta progreso a través del callback onProgress.
  * 
- * Esta función usa la nueva API de descarga segura que implementaremos
- * en Rust, reutilizando la lógica de runtime_install.rs.
+ * Usa la API de descarga segura (vendor_download.rs) que reutiliza
+ * la lógica de runtime_install.rs con verificación SHA256.
  */
 export async function downloadAndInstallVendorAssets(
   onProgress?: (progress: VendorOnboardingProgress) => void
@@ -82,10 +80,10 @@ export async function downloadAndInstallVendorAssets(
 
     // 2. Descargar e instalar cada tipo de asset
     const assetsToDownload: Array<{ kind: VendorAssetKind; required: boolean }> = [
-      { kind: "pcsx2-bios", required: true },
-      { kind: "retroarch-ps1-bios", required: true },
-      { kind: "eden-keys", required: true },
-      { kind: "eden-firmware", required: true },
+      { kind: "bios_ps2", required: true },
+      { kind: "bios_ps1", required: true },
+      { kind: "switch_keys", required: true },
+      { kind: "switch_firmware", required: true },
     ];
 
     for (const { kind, required } of assetsToDownload) {
@@ -93,7 +91,7 @@ export async function downloadAndInstallVendorAssets(
       
       if (!asset) {
         if (required) {
-          throw new Error(`Asset requerido no disponible: ${kind}`);
+          throw new Error(`Asset requerido no disponible en el manifiesto: ${kind}`);
         }
         continue;
       }
@@ -131,38 +129,49 @@ async function downloadAndInstallAsset(
   onProgress?: (progress: VendorOnboardingProgress) => void
 ): Promise<void> {
   const operationId = crypto.randomUUID();
+  const internalKind = mapBackendKindToInternal(asset.kind);
+  const sizeBytes = getAssetSizeBytes(asset);
+  
+  // Nombre descriptivo para UI
+  const displayName = {
+    "bios_ps2": "BIOS de PlayStation 2",
+    "bios_ps1": "BIOS de PlayStation 1",
+    "switch_keys": "Keys de Nintendo Switch",
+    "switch_firmware": "Firmware de Nintendo Switch",
+    "other": asset.fileName,
+  }[asset.kind] || asset.fileName;
 
   try {
     onProgress?.({
       phase: "downloading",
       assetKind: asset.kind,
-      assetName: asset.name,
+      assetName: displayName,
       bytesDone: 0,
-      bytesTotal: asset.size,
-      message: `Descargando ${asset.name}...`,
+      bytesTotal: sizeBytes,
+      message: `Descargando ${displayName}...`,
     });
 
-    // Llamar al nuevo comando Tauri que implementamos
-    // Este comando reutiliza la lógica segura de download_with_hash
+    // Llamar al comando Tauri que implementamos
     await invoke<void>("download_vendor_asset_command", {
       operationId,
-      assetKind: asset.kind,
-      url: asset.url,
+      assetKind: internalKind,
+      url: asset.downloadUrl,
+      fileName: asset.fileName,
       sha256: asset.sha256,
-      size: asset.size,
+      sizeBytes: asset.fileSizeBytes,
     });
 
     onProgress?.({
       phase: "done",
       assetKind: asset.kind,
-      assetName: asset.name,
-      bytesDone: asset.size,
-      bytesTotal: asset.size,
-      message: `${asset.name} instalado.`,
+      assetName: displayName,
+      bytesDone: sizeBytes,
+      bytesTotal: sizeBytes,
+      message: `${displayName} instalado.`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Error instalando ${asset.name}: ${message}`);
+    throw new Error(`Error instalando ${displayName}: ${message}`);
   }
 }
 

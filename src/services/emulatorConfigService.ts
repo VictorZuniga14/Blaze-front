@@ -95,7 +95,7 @@ export async function applyEmulatorConfig(
  */
 export async function readEmulatorConfig(
   runtimeKind: string,
-  configPath: string
+  _configPath: string
 ): Promise<EmulatorConfig> {
   // TODO: Implementar comando Rust para leer config existente
   // Por ahora, retornamos defaults

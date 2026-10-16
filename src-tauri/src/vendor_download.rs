@@ -1,5 +1,9 @@
 //! Descarga e instalación de vendor assets (BIOS, keys, firmware) desde el backend.
 //! Reutiliza la lógica segura de secure_download.rs.
+//!
+//! Contrato del backend: Blaze-back PR #1, rama cursor/vendor-assets-b423
+//! GET /api/vendor/manifest → { items: [...] }
+//! Cada item: { kind, downloadUrl, fileSizeBytes, fileName, sha256, expiresAt? }
 
 use crate::secure_download::{ensure_path_within, secure_download_file, SecureDownloadError};
 use serde::{Deserialize, Serialize};
@@ -21,6 +25,8 @@ pub enum VendorAssetKind {
     EdenKeys,
     #[serde(rename = "eden-firmware")]
     EdenFirmware,
+    #[serde(rename = "other")]
+    Other,
 }
 
 #[derive(Debug)]
@@ -46,8 +52,9 @@ impl From<SecureDownloadError> for VendorDownloadError {
     }
 }
 
-/// Límite de descarga para vendor assets: 50 MB por archivo
-const MAX_VENDOR_ASSET_SIZE: u64 = 50 * 1024 * 1024;
+/// Límite de descarga para vendor assets: 200 MB por archivo
+/// (Switch firmware puede ser ~100-150 MB)
+const MAX_VENDOR_ASSET_SIZE: u64 = 200 * 1024 * 1024;
 
 /// Obtiene la carpeta de vendor assets temporales
 fn vendor_temp_dir(app: &AppHandle) -> Result<PathBuf, VendorDownloadError> {
@@ -60,29 +67,51 @@ fn vendor_temp_dir(app: &AppHandle) -> Result<PathBuf, VendorDownloadError> {
     Ok(dir)
 }
 
-/// Carpetas finales para cada tipo de asset
+/// Carpetas finales para cada tipo de asset (AppData, no Resources)
 fn destination_dir_for_kind(
     app: &AppHandle,
     kind: &VendorAssetKind,
 ) -> Result<PathBuf, VendorDownloadError> {
-    let resources = app
+    let app_data = app
         .path()
-        .resolve("", BaseDirectory::Resource)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources")
-        });
+        .app_data_dir()
+        .map_err(|e| VendorDownloadError::Io(e.to_string()))?;
     
     let dir = match kind {
-        VendorAssetKind::Pcsx2Bios => resources.join("pcsx2").join("bios"),
-        VendorAssetKind::RetroarchPs1Bios => resources.join("retroarch").join("system"),
-        VendorAssetKind::EdenKeys => resources.join("eden").join("keys"),
+        VendorAssetKind::Pcsx2Bios => app_data.join("emulator-data").join("pcsx2").join("bios"),
+        VendorAssetKind::RetroarchPs1Bios => app_data.join("emulator-data").join("retroarch").join("system"),
+        VendorAssetKind::EdenKeys => app_data.join("emulator-data").join("eden").join("keys"),
         VendorAssetKind::EdenFirmware => {
-            resources.join("eden").join("nand").join("system").join("Contents").join("registered")
+            app_data.join("emulator-data").join("eden").join("nand").join("system").join("Contents").join("registered")
         }
+        VendorAssetKind::Other => app_data.join("vendor-temp"),
     };
     
     fs::create_dir_all(&dir).map_err(|e| VendorDownloadError::Io(e.to_string()))?;
     Ok(dir)
+}
+
+/// Detecta el formato de archivo por fileName o por el path de la URL (sin query)
+fn detect_archive_format(url: &str, file_name: &str) -> Option<&'static str> {
+    // Primero intentar por fileName
+    if file_name.ends_with(".7z") {
+        return Some("7z");
+    }
+    if file_name.ends_with(".zip") {
+        return Some("zip");
+    }
+    
+    // Fallback: intentar por URL sin query string
+    let url_without_query = url.split('?').next().unwrap_or(url);
+    
+    if url_without_query.ends_with(".7z") {
+        return Some("7z");
+    }
+    if url_without_query.ends_with(".zip") {
+        return Some("zip");
+    }
+    
+    None // Archivo simple
 }
 
 /// Descarga e instala un vendor asset
@@ -91,9 +120,14 @@ pub async fn download_vendor_asset(
     operation_id: String,
     asset_kind: VendorAssetKind,
     url: String,
+    file_name: String,
     sha256: String,
-    size: u64,
+    size_bytes: String,
 ) -> Result<(), VendorDownloadError> {
+    let size: u64 = size_bytes
+        .parse()
+        .map_err(|_| VendorDownloadError::Io("Tamaño inválido".into()))?;
+    
     if size > MAX_VENDOR_ASSET_SIZE {
         return Err(VendorDownloadError::Download(SecureDownloadError::TooLarge {
             kind: "Asset vendor",
@@ -106,7 +140,7 @@ pub async fn download_vendor_asset(
     
     let cancel = Arc::new(AtomicBool::new(false));
     
-    // Descargar con verificación
+    // Descargar con verificación SHA256
     secure_download_file(
         Some(&app),
         &operation_id,
@@ -121,29 +155,18 @@ pub async fn download_vendor_asset(
     // Determinar destino según el tipo de asset
     let dest_dir = destination_dir_for_kind(&app, &asset_kind)?;
     
-    // Validar que el destino esté dentro de recursos de Blaze
+    // Validar que el destino esté dentro de AppData de Blaze
     ensure_path_within(&dest_dir, &app.path().app_data_dir().unwrap_or_default())?;
 
-    // Determinar si es un archivo o un 7z a extraer
-    let extension = if url.ends_with(".7z") {
-        "7z"
-    } else if url.ends_with(".zip") {
-        "zip"
-    } else {
-        // Archivo simple (p.ej. .bin para PS1 BIOS)
-        "bin"
-    };
+    // Detectar formato por fileName o URL
+    let archive_format = detect_archive_format(&url, &file_name);
 
-    if extension == "7z" || extension == "zip" {
+    if let Some(format) = archive_format {
         // Extraer archivo comprimido
-        extract_vendor_archive(&temp_file, &dest_dir, extension)?;
+        extract_vendor_archive(&temp_file, &dest_dir, format)?;
     } else {
-        // Copiar archivo directamente
-        let dest_file = dest_dir.join(
-            temp_file
-                .file_name()
-                .ok_or_else(|| VendorDownloadError::Io("Nombre de archivo inválido".into()))?
-        );
+        // Copiar archivo directamente con su nombre real
+        let dest_file = dest_dir.join(&file_name);
         fs::copy(&temp_file, &dest_file)
             .map_err(|e| VendorDownloadError::Io(e.to_string()))?;
     }
@@ -266,10 +289,11 @@ pub async fn download_vendor_asset_command(
     operation_id: String,
     asset_kind: VendorAssetKind,
     url: String,
+    file_name: String,
     sha256: String,
-    size: u64,
+    size_bytes: String,
 ) -> Result<(), String> {
-    download_vendor_asset(app, operation_id, asset_kind, url, sha256, size)
+    download_vendor_asset(app, operation_id, asset_kind, url, file_name, sha256, size_bytes)
         .await
         .map_err(|e| e.to_user())
 }

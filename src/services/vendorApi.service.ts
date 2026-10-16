@@ -1,74 +1,33 @@
 import { apiRequest } from "./api.client";
 import { sessionStorage } from "./sessionStorage.service";
-import type { VendorManifest, VendorAsset } from "../types/vendor";
-
-/**
- * Adaptador para pruebas locales sin backend.
- * Cuando el backend esté listo, eliminar esta función y usar siempre fetchVendorManifest.
- */
-function getMockVendorManifest(): VendorManifest {
-  // Mock: URLs ficticias, hashes de ejemplo
-  const mockAssets: VendorAsset[] = [
-    {
-      id: "pcsx2-bios-pack-v1",
-      kind: "pcsx2-bios",
-      name: "PCSX2 BIOS Pack",
-      size: 5_242_880, // ~5MB
-      sha256: "0000000000000000000000000000000000000000000000000000000000000000",
-      url: "https://example.com/mock/pcsx2-bios.7z",
-      expiresAt: new Date(Date.now() + 3600000).toISOString(),
-    },
-    {
-      id: "retroarch-ps1-bios-v1",
-      kind: "retroarch-ps1-bios",
-      name: "RetroArch PS1 BIOS",
-      size: 524_288, // 512KB
-      sha256: "1111111111111111111111111111111111111111111111111111111111111111",
-      url: "https://example.com/mock/ps1-bios.bin",
-      expiresAt: new Date(Date.now() + 3600000).toISOString(),
-    },
-    {
-      id: "eden-keys-pack-v1",
-      kind: "eden-keys",
-      name: "Eden Keys",
-      size: 1_048_576, // 1MB
-      sha256: "2222222222222222222222222222222222222222222222222222222222222222",
-      url: "https://example.com/mock/eden-keys.7z",
-      expiresAt: new Date(Date.now() + 3600000).toISOString(),
-    },
-    {
-      id: "eden-firmware-pack-v1",
-      kind: "eden-firmware",
-      name: "Eden Firmware",
-      size: 10_485_760, // 10MB
-      sha256: "3333333333333333333333333333333333333333333333333333333333333333",
-      url: "https://example.com/mock/eden-firmware.7z",
-      expiresAt: new Date(Date.now() + 3600000).toISOString(),
-    },
-  ];
-
-  return { assets: mockAssets };
-}
+import type { VendorManifest, VendorAsset, VendorAssetKind } from "../types/vendor";
 
 /**
  * Obtiene el manifiesto de assets vendor desde el backend.
  * Requiere autenticación (Bearer token).
+ * 
+ * Contrato real del backend (Blaze-back PR #1, cursor/vendor-assets-b423):
+ * GET /api/vendor/manifest → { items: [...] }
  */
 export async function fetchVendorManifest(): Promise<VendorManifest> {
   const token = await sessionStorage.getToken();
   
-  // Si no hay token, devolver mock para desarrollo
   if (!token) {
-    console.warn("[VendorAPI] Sin token, usando mock local");
-    return getMockVendorManifest();
+    throw new Error("Sin token de autenticación. No se puede obtener el manifiesto vendor.");
   }
 
   try {
-    return await apiRequest<VendorManifest>("/api/vendor/manifest", { token });
+    const manifest = await apiRequest<VendorManifest>("/api/vendor/manifest", { token });
+    
+    // Validar que tenga la estructura correcta
+    if (!manifest || !Array.isArray(manifest.items)) {
+      throw new Error("Respuesta del backend inválida: se esperaba { items: [...] }");
+    }
+    
+    return manifest;
   } catch (error) {
-    // Fallback al mock si el backend no está disponible
-    console.warn("[VendorAPI] Backend no disponible, usando mock local:", error);
-    return getMockVendorManifest();
+    console.error("[VendorAPI] Error al obtener manifiesto:", error);
+    throw error;
   }
 }
 
@@ -77,14 +36,24 @@ export async function fetchVendorManifest(): Promise<VendorManifest> {
  */
 export function findAssetByKind(
   manifest: VendorManifest,
-  kind: VendorAsset["kind"]
+  kind: VendorAssetKind
 ): VendorAsset | null {
-  return manifest.assets.find(a => a.kind === kind) ?? null;
+  return manifest.items.find(a => a.kind === kind) ?? null;
 }
 
 /**
  * Verifica si una URL de asset ha expirado.
  */
 export function isAssetUrlExpired(asset: VendorAsset): boolean {
+  if (!asset.expiresAt) {
+    return false; // Sin expiración
+  }
   return new Date(asset.expiresAt) < new Date();
+}
+
+/**
+ * Obtiene el tamaño en bytes como número.
+ */
+export function getAssetSizeBytes(asset: VendorAsset): number {
+  return parseInt(asset.fileSizeBytes, 10);
 }

@@ -28,7 +28,7 @@ use emulator_data::{
     apply_managed_ra_credentials, import_eden_firmware_zip, initialize_emulator_data,
     import_pcsx2_bios, install_eden_title_nsps, open_managed_eden_keys_folder,
     open_managed_pcsx2_bios_folder, pcsx2_managed_bios_present, prepare_runtime_launch,
-    retroarch_ps1_bios_present,
+    retroarch_ps1_bios_present, eden_keys_present, eden_firmware_present,
 };
 use eden_config::{
     launch_eden_config_ui, launch_runtime_config_ui, list_audio_output_devices,
@@ -105,6 +105,8 @@ pub fn run() {
             open_managed_pcsx2_bios_folder,
             pcsx2_managed_bios_present,
             retroarch_ps1_bios_present,
+            eden_keys_present,
+            eden_firmware_present,
             open_managed_eden_keys_folder,
             import_eden_firmware_zip,
             install_eden_title_nsps,

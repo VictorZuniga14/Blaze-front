@@ -1,31 +1,55 @@
 /**
  * Contrato del backend Blaze para BIOS, keys y firmware de emuladores.
  * GET /api/vendor/manifest con Bearer devuelve esta estructura.
+ * 
+ * Referencia: Blaze-back PR #1, rama cursor/vendor-assets-b423
  */
 
 export type VendorAssetKind = 
-  | "pcsx2-bios"
-  | "retroarch-ps1-bios"
-  | "eden-keys"
-  | "eden-firmware";
+  | "bios_ps2"
+  | "bios_ps1"
+  | "switch_keys"
+  | "switch_firmware"
+  | "other";
 
 export interface VendorAsset {
-  /** ID único del asset (p.ej. "pcsx2-bios-pack-v1") */
-  id: string;
   /** Tipo de asset */
   kind: VendorAssetKind;
-  /** Nombre descriptivo para UI */
-  name: string;
-  /** Tamaño en bytes */
-  size: number;
+  /** URL presignada de descarga (R2/S3) */
+  downloadUrl: string;
+  /** Tamaño en bytes (string) */
+  fileSizeBytes: string;
+  /** Nombre del archivo (ej: "SCPH1001.bin", "prod.keys") */
+  fileName: string;
   /** Hash SHA256 del archivo */
   sha256: string;
-  /** URL presignada temporal (S3/storage) */
-  url: string;
   /** Timestamp de expiración de la URL (ISO 8601) */
-  expiresAt: string;
+  expiresAt?: string;
 }
 
 export interface VendorManifest {
-  assets: VendorAsset[];
+  items: VendorAsset[];
+}
+
+// Mapeo de kinds del backend a tipos internos
+export type InternalAssetKind = 
+  | "pcsx2-bios"
+  | "retroarch-ps1-bios"
+  | "eden-keys"
+  | "eden-firmware"
+  | "other";
+
+export function mapBackendKindToInternal(kind: VendorAssetKind): InternalAssetKind {
+  switch (kind) {
+    case "bios_ps2":
+      return "pcsx2-bios";
+    case "bios_ps1":
+      return "retroarch-ps1-bios";
+    case "switch_keys":
+      return "eden-keys";
+    case "switch_firmware":
+      return "eden-firmware";
+    case "other":
+      return "other";
+  }
 }
