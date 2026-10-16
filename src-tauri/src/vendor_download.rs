@@ -5,14 +5,16 @@
 //! GET /api/vendor/manifest → { items: [...] }
 //! Cada item: { kind, downloadUrl, fileSizeBytes, fileName, sha256, expiresAt? }
 
+use crate::emulator_data::{
+    eden_firmware_registered_dir, eden_keys_dir, managed_data_root, pcsx2_bios_directory,
+    pcsx2_internal_data_root, sanitize_bios_file_name, seed_pcsx2_ini_if_missing,
+};
 use crate::secure_download::{ensure_path_within, secure_download_file, SecureDownloadError};
-use crate::emulator_data::sanitize_bios_file_name;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +70,26 @@ fn vendor_temp_dir(app: &AppHandle) -> Result<PathBuf, VendorDownloadError> {
     Ok(dir)
 }
 
-/// Carpetas finales para cada tipo de asset (AppData, no Resources)
+/// Rutas managed (sin crear carpetas). PCSX2 usa `…/pcsx2/PCSX2/bios` (subdir
+/// interno de `-datapath`), alineado con `pcsx2_managed_bios_present`.
+fn destination_path_for_kind(app_data: &Path, kind: &VendorAssetKind) -> PathBuf {
+    match kind {
+        VendorAssetKind::Pcsx2Bios => {
+            let datapath = managed_data_root(app_data, "pcsx2");
+            pcsx2_bios_directory(&pcsx2_internal_data_root(&datapath))
+        }
+        VendorAssetKind::RetroarchPs1Bios => {
+            managed_data_root(app_data, "retroarch").join("system")
+        }
+        VendorAssetKind::EdenKeys => eden_keys_dir(&managed_data_root(app_data, "eden")),
+        VendorAssetKind::EdenFirmware => {
+            eden_firmware_registered_dir(&managed_data_root(app_data, "eden"))
+        }
+        VendorAssetKind::Other => app_data.join("vendor-temp"),
+    }
+}
+
+/// Carpetas finales para cada tipo de asset (AppData managed).
 fn destination_dir_for_kind(
     app: &AppHandle,
     kind: &VendorAssetKind,
@@ -77,17 +98,8 @@ fn destination_dir_for_kind(
         .path()
         .app_data_dir()
         .map_err(|e| VendorDownloadError::Io(e.to_string()))?;
-    
-    let dir = match kind {
-        VendorAssetKind::Pcsx2Bios => app_data.join("emulator-data").join("pcsx2").join("bios"),
-        VendorAssetKind::RetroarchPs1Bios => app_data.join("emulator-data").join("retroarch").join("system"),
-        VendorAssetKind::EdenKeys => app_data.join("emulator-data").join("eden").join("keys"),
-        VendorAssetKind::EdenFirmware => {
-            app_data.join("emulator-data").join("eden").join("nand").join("system").join("Contents").join("registered")
-        }
-        VendorAssetKind::Other => app_data.join("vendor-temp"),
-    };
-    
+
+    let dir = destination_path_for_kind(&app_data, kind);
     fs::create_dir_all(&dir).map_err(|e| VendorDownloadError::Io(e.to_string()))?;
     Ok(dir)
 }
@@ -178,6 +190,20 @@ pub async fn download_vendor_asset(
 
     // Limpiar archivo temporal
     let _ = fs::remove_file(&temp_file);
+
+    // Tras instalar BIOS PS2: sembrar/parchear PCSX2.ini (SettingsVersion) para
+    // no mostrar el setup wizard en el primer juego.
+    if matches!(asset_kind, VendorAssetKind::Pcsx2Bios) {
+        let app_data = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| VendorDownloadError::Io(e.to_string()))?;
+        let data_root =
+            pcsx2_internal_data_root(&managed_data_root(&app_data, "pcsx2"));
+        seed_pcsx2_ini_if_missing(&data_root).map_err(|e| {
+            VendorDownloadError::Io(format!("Error preparando PCSX2.ini: {e:?}"))
+        })?;
+    }
 
     Ok(())
 }
@@ -301,4 +327,39 @@ pub async fn download_vendor_asset_command(
     download_vendor_asset(app, operation_id, asset_kind, url, file_name, sha256, size_bytes)
         .await
         .map_err(|e| e.to_user())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pcsx2_bios_dest_uses_internal_pcsx2_subdir() {
+        let app = PathBuf::from(r"C:\Users\x\AppData\Roaming\com.blaze.app");
+        let dest = destination_path_for_kind(&app, &VendorAssetKind::Pcsx2Bios);
+        assert_eq!(
+            dest,
+            app.join("emulator-data")
+                .join("pcsx2")
+                .join("PCSX2")
+                .join("bios")
+        );
+    }
+
+    #[test]
+    fn eden_and_retroarch_dest_match_emulator_data_helpers() {
+        let app = PathBuf::from(r"C:\Users\x\AppData\Roaming\com.blaze.app");
+        assert_eq!(
+            destination_path_for_kind(&app, &VendorAssetKind::RetroarchPs1Bios),
+            managed_data_root(&app, "retroarch").join("system")
+        );
+        assert_eq!(
+            destination_path_for_kind(&app, &VendorAssetKind::EdenKeys),
+            eden_keys_dir(&managed_data_root(&app, "eden"))
+        );
+        assert_eq!(
+            destination_path_for_kind(&app, &VendorAssetKind::EdenFirmware),
+            eden_firmware_registered_dir(&managed_data_root(&app, "eden"))
+        );
+    }
 }

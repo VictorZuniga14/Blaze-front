@@ -23,8 +23,11 @@ pub const PCSX2_DATA_SUBDIR: &str = "PCSX2";
 const BIOS_MIN_BYTES: u64 = 4 * 1024 * 1024;
 const BIOS_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
+/// Seed mínimo compatible con PCSX2 Qt 2.8.2 (`VMManager::CheckSettingsVersion`).
+/// Sin `SettingsVersion=1` PCSX2 muestra el modal de reset y fuerza el setup wizard.
 const PCSX2_INI_SEED: &str = "\
 [UI]
+SettingsVersion=1
 SetupWizardIncomplete=false
 StartFullscreen=true
 ";
@@ -254,14 +257,43 @@ fn write_atomic(path: &Path, contents: &str) -> Result<(), LaunchPrepError> {
     Ok(())
 }
 
-/// Siembra `PCSX2.ini` mínimo solo si no existe (managed).
+/// Siembra `PCSX2.ini` mínimo si no existe; si existe sin `SettingsVersion`, lo parchea.
 pub fn seed_pcsx2_ini_if_missing(data_root: &Path) -> Result<(), LaunchPrepError> {
     let ini = data_root.join("inis").join("PCSX2.ini");
-    if ini.is_file() {
+    fs::create_dir_all(data_root.join("bios")).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+    fs::create_dir_all(data_root.join("inis")).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+    if !ini.is_file() {
+        return write_atomic(&ini, PCSX2_INI_SEED);
+    }
+    ensure_pcsx2_ini_settings_version(&ini)
+}
+
+/// PCSX2 2.8.2 exige `[UI] SettingsVersion=1` o dispara reset + wizard.
+fn ensure_pcsx2_ini_settings_version(ini: &Path) -> Result<(), LaunchPrepError> {
+    let raw = fs::read_to_string(ini).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
+    let has_version = raw.lines().any(|line| {
+        let t = line.trim();
+        t.eq_ignore_ascii_case("SettingsVersion=1")
+            || t.eq_ignore_ascii_case("SettingsVersion = 1")
+    });
+    if has_version {
         return Ok(());
     }
-    fs::create_dir_all(data_root.join("bios")).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
-    write_atomic(&ini, PCSX2_INI_SEED)
+
+    let patched = if let Some(idx) = raw.find("[UI]") {
+        let after = idx + "[UI]".len();
+        let mut out = String::with_capacity(raw.len() + 32);
+        out.push_str(&raw[..after]);
+        if !raw[after..].starts_with('\n') && !raw[after..].starts_with("\r\n") {
+            out.push('\n');
+        }
+        out.push_str("SettingsVersion=1\n");
+        out.push_str(&raw[after..]);
+        out
+    } else {
+        format!("[UI]\nSettingsVersion=1\n{raw}")
+    };
+    write_atomic(ini, &patched)
 }
 
 fn retroarch_cfg_seed(root: &Path) -> String {
@@ -1804,10 +1836,30 @@ mod tests {
         let ini = data.join("inis").join("PCSX2.ini");
         assert!(ini.is_file());
         let first = fs::read_to_string(&ini).unwrap();
-        fs::write(&ini, "CHANGED").unwrap();
-        seed_pcsx2_ini_if_missing(&data).unwrap();
-        assert_eq!(fs::read_to_string(&ini).unwrap(), "CHANGED");
+        assert!(first.contains("SettingsVersion=1"));
         assert!(first.contains("SetupWizardIncomplete=false"));
+        // Ini completo (con versión): no se pisa el contenido del usuario.
+        fs::write(&ini, "[UI]\nSettingsVersion=1\nCHANGED=1\n").unwrap();
+        seed_pcsx2_ini_if_missing(&data).unwrap();
+        assert!(fs::read_to_string(&ini).unwrap().contains("CHANGED=1"));
+    }
+
+    #[test]
+    fn seed_pcsx2_ini_patches_missing_settings_version() {
+        let root = temp("seed-ini-patch");
+        let data = root.join("PCSX2");
+        let ini = data.join("inis").join("PCSX2.ini");
+        fs::create_dir_all(ini.parent().unwrap()).unwrap();
+        fs::write(
+            &ini,
+            "[UI]\nSetupWizardIncomplete=false\nStartFullscreen=true\n",
+        )
+        .unwrap();
+        seed_pcsx2_ini_if_missing(&data).unwrap();
+        let patched = fs::read_to_string(&ini).unwrap();
+        assert!(patched.contains("SettingsVersion=1"));
+        assert!(patched.contains("SetupWizardIncomplete=false"));
+        assert!(patched.contains("StartFullscreen=true"));
     }
 
     #[test]

@@ -99,7 +99,7 @@ Response esperado (contrato real):
 
 ## Tipos de assets
 
-- **`bios_ps2`**: BIOS de PS2 (7z que se extrae a `%APPDATA%\Blaze\emulator-data\pcsx2\bios\`)
+- **`bios_ps2`**: BIOS de PS2 (7z → `%APPDATA%\com.blaze.app\emulator-data\pcsx2\PCSX2\bios\`)
 - **`bios_ps1`**: BIOS de PS1 (bin que va a `%APPDATA%\Blaze\emulator-data\retroarch\system\`)
 - **`switch_keys`**: Keys de Switch (7z → `%APPDATA%\Blaze\emulator-data\eden\keys\`)
 - **`switch_firmware`**: Firmware de Switch (7z → `%APPDATA%\Blaze\emulator-data\eden\nand\system\Contents\registered\`)
@@ -206,28 +206,29 @@ Todos los emuladores deben estar en `%APPDATA%\Blaze\runtimes\`:
         └── .installed.json
 ```
 
-### 6. Verificar assets vendor en resources
+### 6. Verificar assets vendor en AppData managed
 
-BIOS, keys y firmware deben estar en las carpetas de recursos:
+BIOS, keys y firmware deben estar en las mismas carpetas que usa el launch:
 
 #### PCSX2
 ```
-%APPDATA%\Blaze\resources\pcsx2\bios\
+%APPDATA%\com.blaze.app\emulator-data\pcsx2\PCSX2\bios\
 ```
 - Debe haber archivos .bin de BIOS de PS2
-- Intentar lanzar un juego de PS2
+- `PCSX2.ini` en `...\pcsx2\PCSX2\inis\` con `SettingsVersion=1`
+- Intentar lanzar un juego de PS2 (sin setup wizard)
 
 #### RetroArch PS1
 ```
-%APPDATA%\Blaze\resources\retroarch\system\
+%APPDATA%\com.blaze.app\emulator-data\retroarch\system\
 ```
 - Debe haber archivos como `scph1001.bin`
 - Intentar lanzar un juego de PS1
 
 #### Eden Switch
 ```
-%APPDATA%\Blaze\resources\eden\keys\
-%APPDATA%\Blaze\resources\eden\nand\system\Contents\registered\
+%APPDATA%\com.blaze.app\emulator-data\eden\keys\
+%APPDATA%\com.blaze.app\emulator-data\eden\nand\system\Contents\registered\
 ```
 - Intentar lanzar un juego de Switch
 
@@ -353,10 +354,11 @@ Si algo falla críticamente:
 - [ ] PCSX2 descargado e instalado en `%APPDATA%\Blaze\runtimes\pcsx2\`
 - [ ] RetroArch descargado e instalado en `%APPDATA%\Blaze\runtimes\retroarch\`
 - [ ] Eden descargado e instalado en `%APPDATA%\Blaze\runtimes\eden\`
-- [ ] BIOS PCSX2 descargada en `%APPDATA%\Blaze\resources\pcsx2\bios\`
-- [ ] BIOS PS1 descargada en `%APPDATA%\Blaze\resources\retroarch\system\`
-- [ ] Keys Eden descargadas en `%APPDATA%\Blaze\resources\eden\keys\`
-- [ ] Firmware Eden descargado en `%APPDATA%\Blaze\resources\eden\nand\`
+- [ ] BIOS PCSX2 descargada en `%APPDATA%\com.blaze.app\emulator-data\pcsx2\PCSX2\bios\`
+- [ ] BIOS PS1 descargada en `%APPDATA%\com.blaze.app\emulator-data\retroarch\system\`
+- [ ] Keys Eden descargadas en `%APPDATA%\com.blaze.app\emulator-data\eden\keys\`
+- [ ] PCSX2.ini tiene `SettingsVersion=1` (sin setup wizard)
+- [ ] Firmware Eden en `%APPDATA%\com.blaze.app\emulator-data\eden\nand\system\Contents\registered\`
 - [ ] Segunda ejecución **no** muestra onboarding
 - [ ] PCSX2 funciona (lanza juegos de PS2)
 - [ ] RetroArch PS1 funciona (lanza juegos de PS1)
