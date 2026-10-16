@@ -29,7 +29,9 @@ Este branch implementa la descarga completa de **todos los emuladores** (PCSX2, 
 - No muestra pantalla de onboarding
 - Va directo a la biblioteca
 
-## Backend requerido
+## Backend requerido (Contrato Real)
+
+**Referencia:** Blaze-back PR #1, rama `cursor/vendor-assets-b423`
 
 El backend debe implementar el endpoint:
 
@@ -38,65 +40,81 @@ GET /api/vendor/manifest
 Authorization: Bearer <token>
 ```
 
-Response esperado:
+Response esperado (contrato real):
 
 ```json
 {
-  "assets": [
+  "items": [
     {
-      "id": "pcsx2-bios-pack-v1",
-      "kind": "pcsx2-bios",
-      "name": "PCSX2 BIOS Pack",
-      "size": 5242880,
-      "sha256": "hash-sha256-del-archivo",
-      "url": "https://storage-presignada.com/pcsx2-bios.7z",
+      "kind": "bios_ps2",
+      "downloadUrl": "https://pub-xxxxx.r2.dev/pcsx2-bios.7z?X-Amz-...",
+      "fileSizeBytes": "5242880",
+      "fileName": "pcsx2-bios.7z",
+      "sha256": "abc123...",
       "expiresAt": "2026-10-15T12:00:00Z"
     },
     {
-      "id": "retroarch-ps1-bios-v1",
-      "kind": "retroarch-ps1-bios",
-      "name": "RetroArch PS1 BIOS",
-      "size": 524288,
-      "sha256": "hash-sha256",
-      "url": "https://storage.com/ps1-bios.bin",
+      "kind": "bios_ps1",
+      "downloadUrl": "https://pub-xxxxx.r2.dev/SCPH1001.bin?X-Amz-...",
+      "fileSizeBytes": "524288",
+      "fileName": "SCPH1001.bin",
+      "sha256": "def456...",
       "expiresAt": "2026-10-15T12:00:00Z"
     },
     {
-      "id": "eden-keys-pack-v1",
-      "kind": "eden-keys",
-      "name": "Eden Keys",
-      "size": 1048576,
-      "sha256": "hash-sha256",
-      "url": "https://storage.com/eden-keys.7z",
+      "kind": "switch_keys",
+      "downloadUrl": "https://pub-xxxxx.r2.dev/eden-keys.7z?X-Amz-...",
+      "fileSizeBytes": "1048576",
+      "fileName": "eden-keys.7z",
+      "sha256": "ghi789...",
       "expiresAt": "2026-10-15T12:00:00Z"
     },
     {
-      "id": "eden-firmware-pack-v1",
-      "kind": "eden-firmware",
-      "name": "Eden Firmware",
-      "size": 10485760,
-      "sha256": "hash-sha256",
-      "url": "https://storage.com/eden-firmware.7z",
+      "kind": "switch_firmware",
+      "downloadUrl": "https://pub-xxxxx.r2.dev/eden-firmware.7z?X-Amz-...",
+      "fileSizeBytes": "157286400",
+      "fileName": "eden-firmware.7z",
+      "sha256": "jkl012...",
       "expiresAt": "2026-10-15T12:00:00Z"
     }
   ]
 }
 ```
 
+### Campos del contrato
+
+- **`kind`**: `bios_ps2`, `bios_ps1`, `switch_keys`, `switch_firmware`, `other` (guiones bajos)
+- **`downloadUrl`**: URL presignada de Cloudflare R2 (termina en `?X-Amz-...`)
+- **`fileSizeBytes`**: String con el tamaño en bytes
+- **`fileName`**: Nombre real del archivo (se usa para guardar con ese nombre)
+- **`sha256`**: Hash SHA256 hexadecimal para verificación
+- **`expiresAt`** (opcional): Timestamp ISO 8601 de expiración de la URL
+
+### Cambios vs versión anterior
+
+- ✅ `{ items: [...] }` en lugar de `{ assets: [...] }`
+- ✅ Kinds con guiones bajos: `bios_ps2`, `bios_ps1`, `switch_keys`, `switch_firmware`
+- ✅ `downloadUrl` (no `url`), `fileSizeBytes` (string), `fileName`
+- ❌ Eliminados campos: `id`, `name` (no necesarios)
+
 ## Tipos de assets
 
-- `pcsx2-bios`: BIOS de PS2 (7z que se extrae a `resources/pcsx2/bios/`)
-- `retroarch-ps1-bios`: BIOS de PS1 (bin que va a `resources/retroarch/system/`)
-- `eden-keys`: Keys de Switch (7z → `resources/eden/keys/`)
-- `eden-firmware`: Firmware de Switch (7z → `resources/eden/nand/system/Contents/registered/`)
+- **`bios_ps2`**: BIOS de PS2 (7z que se extrae a `%APPDATA%\Blaze\emulator-data\pcsx2\bios\`)
+- **`bios_ps1`**: BIOS de PS1 (bin que va a `%APPDATA%\Blaze\emulator-data\retroarch\system\`)
+- **`switch_keys`**: Keys de Switch (7z → `%APPDATA%\Blaze\emulator-data\eden\keys\`)
+- **`switch_firmware`**: Firmware de Switch (7z → `%APPDATA%\Blaze\emulator-data\eden\nand\system\Contents\registered\`)
+
+### Nota sobre destinos
+
+Assets van a **AppData** (`emulator-data/`), **NO** a Resources. Esto permite actualización sin permisos de admin.
 
 ## Desarrollo sin backend
 
-Si el backend no está listo, el código usa mocks internos:
+**IMPORTANTE:** El frontend ya NO tiene mock ni fallback. Si no hay backend, la app falla al intentar obtener el manifiesto.
 
-- `src/services/vendorApi.service.ts` tiene URLs de ejemplo
-- Los emuladores se descargan del manifiesto embebido (`runtimes.manifest.json`)
-- Solo los assets vendor (BIOS/keys/firmware) usan el mock del backend
+Para desarrollo local:
+1. Implementar endpoint `/api/vendor/manifest` en backend local
+2. O usar un mock server (ej: json-server, msw) que devuelva el contrato correcto
 
 ## Preparación del ambiente
 
@@ -224,13 +242,14 @@ BIOS, keys y firmware deben estar en las carpetas de recursos:
 #### Sin conexión
 1. Desconectar Internet
 2. Hacer login
-3. Debe mostrar error claro
+3. Debe mostrar error claro: "Sin token de autenticación" o "Sin conexión"
 4. Botón "Reintentar" debe estar visible
 
 #### Backend caído
-1. Detener el backend
+1. Detener el backend o no tener endpoint `/api/vendor/manifest`
 2. Hacer login
-3. Debe usar mocks (desarrollo) o mostrar error
+3. Debe mostrar error claro (ya NO hay fallback a mock)
+4. App no continúa hasta que el backend responda
 
 ## Verificación de seguridad
 
@@ -239,7 +258,7 @@ BIOS, keys y firmware deben estar en las carpetas de recursos:
 Intentar desde la consola del navegador (F12):
 
 ```javascript
-// Esto debe fallar:
+// Esto debe fallar (fuera de scope):
 await window.__TAURI__.core.invoke('remove_path', { 
   path: 'C:\\Windows\\System32\\evil.dll' 
 });
@@ -255,6 +274,25 @@ await window.__TAURI__.core.invoke('catalog_games_dir', {});
 2. No debe haber errores de CSP bloqueando recursos legítimos
 3. Verificar que los estilos y scripts inline funcionan
 
+### Allowlist de hosts
+
+Verificar que SOLO estos hosts son permitidos:
+- `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`
+- `buildbot.libretro.com`
+- `git.eden-emu.dev`
+- `*.r2.dev` (Cloudflare R2 para assets vendor)
+
+Intentar descargar desde otro host debe fallar con "Host no permitido".
+
+### Verificación de archivos Eden
+
+1. Ir a `%APPDATA%\Blaze\emulator-data\eden\keys\`
+2. Debe existir `prod.keys` con tamaño >32 bytes
+3. Ir a `%APPDATA%\Blaze\emulator-data\eden\nand\system\Contents\registered\`
+4. Debe haber archivos `.nca` (firmware)
+
+Si solo hay placeholders vacíos, la verificación debe fallar.
+
 ## Rollback en caso de problemas
 
 Si algo falla críticamente:
@@ -262,6 +300,26 @@ Si algo falla críticamente:
 1. Hacer checkout de `dev`
 2. Regenerar instalador con el workflow anterior (incluye BIOS embebidas)
 3. El flujo anterior sigue funcionando
+
+## Cambios clave en esta versión
+
+### Contrato backend actualizado
+- ✅ `{ items: [...] }` en lugar de `{ assets: [...] }`
+- ✅ Kinds: `bios_ps2`, `bios_ps1`, `switch_keys`, `switch_firmware`
+- ✅ `downloadUrl`, `fileSizeBytes`, `fileName`
+- ✅ Sin mocks ni fallbacks en release
+
+### Seguridad mejorada
+- ✅ Límite 200 MB por asset (vs 50 MB antes)
+- ✅ Wildcard `*.r2.dev` para URLs de R2
+- ✅ Detección de formato por fileName (evita problemas con query params)
+- ✅ Archivos guardados con nombre real
+- ✅ Destino AppData (no Resources)
+
+### Verificación real
+- ✅ Eden keys verificados: `prod.keys` >32 bytes
+- ✅ Eden firmware verificado: archivos `.nca` presentes
+- ❌ Sin placeholders ni "asumir listo"
 
 ## Checklist de pruebas
 
