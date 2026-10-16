@@ -52,9 +52,9 @@ impl From<SecureDownloadError> for VendorDownloadError {
     }
 }
 
-/// Límite de descarga para vendor assets: 200 MB por archivo
-/// (Switch firmware puede ser ~100-150 MB)
-const MAX_VENDOR_ASSET_SIZE: u64 = 200 * 1024 * 1024;
+/// Límite de descarga para vendor assets: 500 MB por archivo
+/// (alineado con el límite del backend)
+const MAX_VENDOR_ASSET_SIZE: u64 = 500 * 1024 * 1024;
 
 /// Obtiene la carpeta de vendor assets temporales
 fn vendor_temp_dir(app: &AppHandle) -> Result<PathBuf, VendorDownloadError> {

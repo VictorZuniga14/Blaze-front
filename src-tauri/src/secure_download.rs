@@ -21,8 +21,42 @@ const ALLOWED_HOSTS: &[&str] = &[
 
 // Patrones wildcard para hosts dinámicos (ej: R2)
 const ALLOWED_HOST_PATTERNS: &[&str] = &[
-    "*.r2.dev",  // Cloudflare R2 storage
+    "*.r2.cloudflarestorage.com",  // Cloudflare R2 storage (URLs presignadas)
+    "*.r2.dev",                     // Cloudflare R2 public domains (opcional)
 ];
+
+const DOWNLOAD_TIMEOUT_SECS: u64 = 60 * 60;
+const CONNECT_TIMEOUT_SECS: u64 = 30;
+const PROGRESS_EMIT_EVERY: u64 = 512 * 1024;
+
+#[derive(Debug)]
+pub enum SecureDownloadError {
+    Network(String),
+    HostNotAllowed(String),
+    HashMismatch { expected: String, got: String },
+    Cancelled,
+    Io(String),
+    TooLarge { kind: &'static str, limit: u64 },
+}
+
+impl SecureDownloadError {
+    pub fn to_user(&self) -> String {
+        match self {
+            Self::Network(m) => format!("Sin conexión o error de red: {m}"),
+            Self::HostNotAllowed(h) => format!("Host no permitido: {h}"),
+            Self::HashMismatch { expected, got } => {
+                format!(
+                    "El archivo descargado no coincide con el hash esperado (esperado {expected}, obtuvo {got})."
+                )
+            }
+            Self::Cancelled => "Descarga cancelada.".into(),
+            Self::Io(m) => format!("Error de disco: {m}"),
+            Self::TooLarge { kind, limit } => {
+                format!("{kind} supera el límite de {} bytes.", limit)
+            }
+        }
+    }
+}
 
 fn host_allowed(url: &reqwest::Url) -> bool {
     if url.scheme() != "https" {
@@ -48,7 +82,17 @@ fn host_allowed(url: &reqwest::Url) -> bool {
 
 fn matches_wildcard_pattern(host: &str, pattern: &str) -> bool {
     if let Some(suffix) = pattern.strip_prefix("*.") {
-        host.ends_with(suffix)
+        // Para match correcto con *.suffix:
+        // 1. Host debe terminar en .suffix (no solo suffix)
+        // 2. Debe haber al menos un carácter antes del punto
+        if host == suffix {
+            // "r2.cloudflarestorage.com" NO debe hacer match con "*.r2.cloudflarestorage.com"
+            return false;
+        }
+        
+        // Debe terminar con ".suffix" (con el punto incluido)
+        let full_suffix = format!(".{}", suffix);
+        host.ends_with(&full_suffix)
     } else {
         host == pattern
     }
@@ -265,4 +309,105 @@ pub fn ensure_path_within(
     }
     
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_host_matching_exact() {
+        let url = reqwest::Url::parse("https://github.com/test").unwrap();
+        assert!(host_allowed(&url), "github.com debe estar permitido");
+
+        let url = reqwest::Url::parse("https://buildbot.libretro.com/test").unwrap();
+        assert!(host_allowed(&url), "buildbot.libretro.com debe estar permitido");
+    }
+
+    #[test]
+    fn test_host_matching_wildcard_r2_cloudflarestorage() {
+        // URL presignada realista de R2
+        let url = reqwest::Url::parse(
+            "https://abc123.r2.cloudflarestorage.com/blaze-vendor/bios_ps2.7z?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=..."
+        ).unwrap();
+        assert!(
+            host_allowed(&url),
+            "*.r2.cloudflarestorage.com debe estar permitido (URLs presignadas)"
+        );
+
+        let url = reqwest::Url::parse("https://my-account.r2.cloudflarestorage.com/file.bin").unwrap();
+        assert!(
+            host_allowed(&url),
+            "Cualquier subdomain.r2.cloudflarestorage.com debe estar permitido"
+        );
+    }
+
+    #[test]
+    fn test_host_matching_wildcard_r2_dev() {
+        let url = reqwest::Url::parse("https://pub-xyz.r2.dev/file.bin").unwrap();
+        assert!(
+            host_allowed(&url),
+            "*.r2.dev debe estar permitido (dominios públicos)"
+        );
+    }
+
+    #[test]
+    fn test_host_not_allowed() {
+        let url = reqwest::Url::parse("https://evil.com/malware.exe").unwrap();
+        assert!(
+            !host_allowed(&url),
+            "evil.com NO debe estar permitido"
+        );
+
+        let url = reqwest::Url::parse("https://not-r2.cloudflarestorage.com/file").unwrap();
+        assert!(
+            !host_allowed(&url),
+            "Dominios que no terminan en .r2.cloudflarestorage.com NO deben estar permitidos"
+        );
+    }
+
+    #[test]
+    fn test_http_not_allowed() {
+        let url = reqwest::Url::parse("http://github.com/test").unwrap();
+        assert!(
+            !host_allowed(&url),
+            "HTTP (no HTTPS) NO debe estar permitido"
+        );
+    }
+
+    #[test]
+    fn test_wildcard_pattern_matching() {
+        assert!(
+            matches_wildcard_pattern("abc123.r2.cloudflarestorage.com", "*.r2.cloudflarestorage.com"),
+            "Subdomain wildcard debe funcionar"
+        );
+
+        assert!(
+            matches_wildcard_pattern("pub-xyz.r2.dev", "*.r2.dev"),
+            "Subdomain wildcard r2.dev debe funcionar"
+        );
+
+        assert!(
+            !matches_wildcard_pattern("r2.cloudflarestorage.com", "*.r2.cloudflarestorage.com"),
+            "Dominio sin subdomain NO debe hacer match con wildcard"
+        );
+
+        assert!(
+            !matches_wildcard_pattern("evil-r2.cloudflarestorage.com.evil.com", "*.r2.cloudflarestorage.com"),
+            "Dominio con suffix malicioso NO debe hacer match"
+        );
+    }
+
+    #[test]
+    fn test_validate_url_r2_presigned() {
+        // URL presignada realista
+        let url_str = "https://abc123.r2.cloudflarestorage.com/blaze-vendor/switch_firmware.7z?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=abc/20261016/auto/s3/aws4_request&X-Amz-Date=20261016T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abcdef123456";
+        
+        let result = validate_url(url_str);
+        assert!(
+            result.is_ok(),
+            "URL presignada de R2 debe ser válida: {:?}",
+            result.err()
+        );
+    }
 }
