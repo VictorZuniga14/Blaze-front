@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { VendorAsset, VendorAssetKind } from "../types/vendor";
 import { fetchVendorManifest, findAssetsByKind, getAssetSizeBytes } from "./vendorApi.service";
 import { mapBackendKindToInternal } from "../types/vendor";
@@ -19,6 +20,14 @@ export type VendorOnboardingStatus = {
   edenFirmwareReady: boolean;
   allReady: boolean;
 };
+
+type SecureDownloadProgressEvent = {
+  operationId: string;
+  bytesDone: number;
+  bytesTotal: number;
+};
+
+const BLAZE_LABEL = "Descargando Blaze…";
 
 /**
  * Verifica el estado de los assets vendor (BIOS, keys, firmware).
@@ -58,7 +67,7 @@ export async function checkVendorAssetStatus(): Promise<VendorOnboardingStatus> 
 /**
  * Descarga e instala todos los assets vendor necesarios.
  * Reporta progreso a través del callback onProgress.
- * 
+ *
  * Usa la API de descarga segura (vendor_download.rs) que reutiliza
  * la lógica de runtime_install.rs con verificación SHA256.
  */
@@ -66,19 +75,17 @@ export async function downloadAndInstallVendorAssets(
   onProgress?: (progress: VendorOnboardingProgress) => void
 ): Promise<void> {
   try {
-    // 1. Obtener manifiesto del backend
     onProgress?.({
       phase: "downloading",
       assetKind: null,
-      assetName: "Obteniendo configuración...",
+      assetName: "Blaze",
       bytesDone: 0,
       bytesTotal: 1,
-      message: "Conectando con Blaze...",
+      message: BLAZE_LABEL,
     });
 
     const manifest = await fetchVendorManifest();
 
-    // 2. Descargar e instalar cada tipo de asset
     const assetsToDownload: Array<{ kind: VendorAssetKind; required: boolean }> = [
       { kind: "bios_ps2", required: true },
       { kind: "bios_ps1", required: true },
@@ -86,29 +93,34 @@ export async function downloadAndInstallVendorAssets(
       { kind: "switch_firmware", required: true },
     ];
 
+    const pending: VendorAsset[] = [];
     for (const { kind, required } of assetsToDownload) {
       const assets = findAssetsByKind(manifest, kind);
-      
       if (assets.length === 0) {
         if (required) {
           throw new Error(`Asset requerido no disponible en el manifiesto: ${kind}`);
         }
         continue;
       }
+      pending.push(...assets);
+    }
 
-      // Descargar e instalar TODOS los assets de este kind
-      for (const asset of assets) {
-        await downloadAndInstallAsset(asset, onProgress);
-      }
+    const totalBytes = pending.reduce((sum, a) => sum + getAssetSizeBytes(a), 0);
+    let bytesBefore = 0;
+
+    for (const asset of pending) {
+      const size = getAssetSizeBytes(asset);
+      await downloadAndInstallAsset(asset, bytesBefore, totalBytes || 1, onProgress);
+      bytesBefore += size;
     }
 
     onProgress?.({
       phase: "done",
       assetKind: null,
-      assetName: "Completado",
-      bytesDone: 1,
-      bytesTotal: 1,
-      message: "Blaze está listo para usar.",
+      assetName: "Blaze",
+      bytesDone: totalBytes || 1,
+      bytesTotal: totalBytes || 1,
+      message: "Blaze está listo.",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -126,35 +138,46 @@ export async function downloadAndInstallVendorAssets(
 
 /**
  * Descarga e instala un asset vendor específico.
+ * La UI solo muestra "Descargando Blaze…" (sin nombres de BIOS/firmware).
  */
 async function downloadAndInstallAsset(
   asset: VendorAsset,
+  bytesBefore: number,
+  totalBytes: number,
   onProgress?: (progress: VendorOnboardingProgress) => void
 ): Promise<void> {
   const operationId = crypto.randomUUID();
   const internalKind = mapBackendKindToInternal(asset.kind);
   const sizeBytes = getAssetSizeBytes(asset);
-  
-  // Nombre descriptivo para UI
-  const displayName = {
-    "bios_ps2": "BIOS de PlayStation 2",
-    "bios_ps1": "BIOS de PlayStation 1",
-    "switch_keys": "Keys de Nintendo Switch",
-    "switch_firmware": "Firmware de Nintendo Switch",
-    "other": asset.fileName,
-  }[asset.kind] || asset.fileName;
 
-  try {
+  const report = (
+    phase: VendorOnboardingProgress["phase"],
+    doneInAsset: number,
+    message: string,
+  ) => {
     onProgress?.({
-      phase: "downloading",
+      phase,
       assetKind: asset.kind,
-      assetName: displayName,
-      bytesDone: 0,
-      bytesTotal: sizeBytes,
-      message: `Descargando ${displayName}...`,
+      assetName: "Blaze",
+      bytesDone: Math.min(bytesBefore + doneInAsset, totalBytes),
+      bytesTotal: totalBytes,
+      message,
     });
+  };
 
-    // Llamar al comando Tauri que implementamos
+  let unlisten: UnlistenFn | undefined;
+  try {
+    report("downloading", 0, BLAZE_LABEL);
+
+    unlisten = await listen<SecureDownloadProgressEvent>(
+      "secure-download-progress",
+      (event) => {
+        const p = event.payload;
+        if (p.operationId !== operationId) return;
+        report("downloading", p.bytesDone, BLAZE_LABEL);
+      },
+    );
+
     await invoke<void>("download_vendor_asset_command", {
       operationId,
       assetKind: internalKind,
@@ -164,17 +187,12 @@ async function downloadAndInstallAsset(
       sizeBytes: asset.fileSizeBytes,
     });
 
-    onProgress?.({
-      phase: "done",
-      assetKind: asset.kind,
-      assetName: displayName,
-      bytesDone: sizeBytes,
-      bytesTotal: sizeBytes,
-      message: `${displayName} instalado.`,
-    });
+    report("done", sizeBytes, BLAZE_LABEL);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Error instalando ${displayName}: ${message}`);
+    throw new Error(`Error descargando Blaze: ${message}`);
+  } finally {
+    unlisten?.();
   }
 }
 

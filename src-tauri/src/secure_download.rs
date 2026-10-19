@@ -71,24 +71,21 @@ fn host_allowed(url: &reqwest::Url) -> bool {
                 return true;
             }
             
-            // 2. Intentar host R2 exacto configurado (recomendado en producción)
+            // 2. Host R2 exacto (opcional, vía BLAZE_R2_HOST)
             if let Ok(r2_host) = env::var("BLAZE_R2_HOST") {
                 if !r2_host.is_empty() && host == r2_host {
                     return true;
                 }
             }
-            
-            // 3. Fallback: intentar patrones wildcard (solo si no hay host exacto configurado)
-            // ADVERTENCIA: Aceptar cualquier cuenta R2 es menos seguro.
-            // En producción, configurar BLAZE_R2_HOST con el host exacto (ej: "abc123.r2.cloudflarestorage.com")
-            if env::var("BLAZE_R2_HOST").is_err() {
-                for pattern in ALLOWED_HOST_PATTERNS_FALLBACK {
-                    if matches_wildcard_pattern(host, pattern) {
-                        return true;
-                    }
+
+            // 3. Wildcard R2 (URLs presignadas). Siempre disponible: si BLAZE_R2_HOST
+            // está mal seteado, no bloquear descargas vendor del cliente.
+            for pattern in ALLOWED_HOST_PATTERNS_FALLBACK {
+                if matches_wildcard_pattern(host, pattern) {
+                    return true;
                 }
             }
-            
+
             false
         }
         None => false,
@@ -302,8 +299,28 @@ fn emit_download_progress(
     }
 }
 
-/// Valida que una ruta esté dentro de un directorio permitido (anti path-traversal).
-/// IMPORTANTE: Rechaza componentes ".." explícitamente para evitar bypass cuando canonicalize falla.
+fn strip_windows_verbatim(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path
+}
+
+fn normalize_path_for_compare(path: &Path) -> PathBuf {
+    let resolved = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
+    strip_windows_verbatim(resolved)
+}
+
+
 pub fn ensure_path_within(
     path: &Path,
     allowed_parent: &Path,
@@ -317,37 +334,33 @@ pub fn ensure_path_within(
             )));
         }
     }
-    
-    // 2. Normalizar y validar que esté dentro del padre permitido
-    let canonical_parent = allowed_parent
-        .canonicalize()
-        .unwrap_or_else(|_| allowed_parent.to_path_buf());
-    
-    // Si la ruta no existe, construir la ruta absoluta manualmente
+
+    // 2. Normalizar ambos lados igual (sin mezclar `\\?\` con rutas normales).
+    let parent = normalize_path_for_compare(allowed_parent);
+
     let absolute_path = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        canonical_parent.join(path)
+        parent.join(path)
     };
-    
-    let canonical_path = absolute_path
-        .canonicalize()
-        .unwrap_or_else(|_| absolute_path.clone());
-    
-    if !canonical_path.starts_with(&canonical_parent) {
+
+    let candidate = normalize_path_for_compare(&absolute_path);
+
+    if !candidate.starts_with(&parent) {
         return Err(SecureDownloadError::Io(format!(
             "Ruta {} fuera del directorio permitido {}",
             path.display(),
             allowed_parent.display()
         )));
     }
-    
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
 
     #[test]
@@ -392,6 +405,37 @@ mod tests {
             ensure_path_within(&safe_path2, &temp).is_ok(),
             "Debe permitir subdirectorios normales"
         );
+    }
+
+    #[test]
+    fn test_ensure_path_within_absolute_nonexistent_under_canonical_parent() {
+        let root = std::env::temp_dir().join(format!(
+            "blaze-ensure-path-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let games = root.join("catalog-games");
+        fs::create_dir_all(&games).unwrap();
+
+        let games_canon = games.canonicalize().unwrap();
+        let dest = games_canon.join("game-id").join("rom.iso");
+        assert!(
+            !dest.exists(),
+            "dest no debe existir para reproducir el bug"
+        );
+        assert!(
+            ensure_path_within(&dest, &games_canon).is_ok(),
+            "hijo inexistente bajo catalog-games debe permitirse"
+        );
+
+        let outside = root.join("evil.bin");
+        assert!(ensure_path_within(&outside, &games_canon).is_err());
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

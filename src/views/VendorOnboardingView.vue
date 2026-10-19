@@ -12,10 +12,10 @@ const router = useRouter();
 const progress = ref<VendorOnboardingProgress>({
   phase: "downloading",
   assetKind: null,
-  assetName: "Preparando...",
+  assetName: "Blaze",
   bytesDone: 0,
   bytesTotal: 1,
-  message: "Iniciando descarga de componentes...",
+  message: "Descargando Blaze…",
 });
 
 const error = ref<string | null>(null);
@@ -64,10 +64,10 @@ async function retry(): Promise<void> {
   progress.value = {
     phase: "downloading",
     assetKind: null,
-    assetName: "Preparando...",
+    assetName: "Blaze",
     bytesDone: 0,
     bytesTotal: 1,
-    message: "Iniciando descarga de componentes...",
+    message: "Descargando Blaze…",
   };
   await runOnboarding();
 }
@@ -78,12 +78,11 @@ async function retry(): Promise<void> {
     <div class="onboarding-content">
       <!-- Loader animado -->
       <div v-if="!error" class="loader-container">
-        <BlazeLoader :label="isComplete ? 'Listo' : 'Preparando Blaze...'" />
+        <BlazeLoader :label="isComplete ? 'Listo' : 'Descargando Blaze…'" />
       </div>
 
       <!-- Información de progreso -->
       <div class="progress-info">
-        <p class="progress-asset">{{ progress.assetName }}</p>
         <p class="progress-message">{{ progress.message }}</p>
         
         <!-- Barra de progreso -->

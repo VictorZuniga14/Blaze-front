@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "./stores/auth";
@@ -11,16 +11,22 @@ import {
   checkVendorAssetStatus,
   downloadAndInstallVendorAssets,
   type VendorOnboardingProgress,
+  type VendorOnboardingStatus,
 } from "./services/vendorOnboarding.service";
 import BlazeLoader from "./components/BlazeLoader.vue";
 import AppNav from "./components/AppNav.vue";
 import WindowChrome from "./components/WindowChrome.vue";
 import DownloadProgressHud from "./components/DownloadProgressHud.vue";
 
-type BootPhase = "checking" | "signingIn" | "loading" | "vendorOnboarding" | "ready";
+type BootPhase =
+  | "checking"
+  | "signingIn"
+  | "loading"
+  | "vendorOnboarding"
+  | "ready";
 
-const SIGNING_IN_MS = 2000;
-const LOADING_MS = 2000;
+const SIGNING_IN_MS = 1200;
+const LOADING_MS = 1200;
 
 const auth = useAuthStore();
 const raSync = useRaSessionSyncStore();
@@ -55,16 +61,94 @@ const showGlobalDownloadHud = computed(() => {
 const phase = ref<BootPhase>("checking");
 const vendorProgress = ref<VendorOnboardingProgress | null>(null);
 const vendorError = ref<string | null>(null);
+const vendorRetrying = ref(false);
 
 const signingName = computed(() => user.value?.username ?? "");
 
 const vendorProgressPercent = computed(() => {
   if (!vendorProgress.value || vendorProgress.value.bytesTotal === 0) return 0;
-  return Math.round((vendorProgress.value.bytesDone / vendorProgress.value.bytesTotal) * 100);
+  return Math.round(
+    (vendorProgress.value.bytesDone / vendorProgress.value.bytesTotal) * 100,
+  );
 });
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function missingVendorLabel(status: VendorOnboardingStatus): string {
+  const parts: string[] = [];
+  if (!status.pcsx2BiosReady) parts.push("BIOS PS2");
+  if (!status.retroarchPs1BiosReady) parts.push("BIOS PS1");
+  if (!status.edenKeysReady) parts.push("keys Switch");
+  if (!status.edenFirmwareReady) parts.push("firmware Switch");
+  return parts.join(", ");
+}
+
+/**
+ * Descarga BIOS/keys/firmware si faltan. No deja pasar a la app si falla.
+ * @returns true si todo quedó listo.
+ */
+async function runVendorGate(): Promise<boolean> {
+  vendorError.value = null;
+  vendorProgress.value = null;
+
+  const before = await checkVendorAssetStatus();
+  if (before.allReady) {
+    return true;
+  }
+
+  phase.value = "vendorOnboarding";
+
+  try {
+    await downloadAndInstallVendorAssets((p) => {
+      vendorProgress.value = p;
+      if (p.phase === "error") {
+        vendorError.value = p.message;
+      }
+    });
+
+    const after = await checkVendorAssetStatus();
+    if (!after.allReady) {
+      const missing = missingVendorLabel(after);
+      throw new Error(
+        `La descarga terminó pero aún faltan archivos: ${missing}. Reintentá.`,
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error("[Blaze] Error en vendor onboarding:", error);
+    vendorError.value =
+      error instanceof Error ? error.message : String(error);
+    return false;
+  }
+}
+
+async function finishBootAfterVendor(): Promise<void> {
+  // Salir del onboarding YA: ensureDefaultRuntimes puede tardar minutos
+  // y no debe dejar al usuario mirando "Firmware de Nintendo Switch".
+  phase.value = "loading";
+  try {
+    await ensureDefaultRuntimes();
+    console.info("[Blaze] Runtimes listos (PCSX2 + RetroArch + Eden)");
+  } catch (error) {
+    console.error("[Blaze] Error preparando runtimes:", error);
+  }
+  phase.value = "ready";
+}
+
+async function retryVendorOnboarding(): Promise<void> {
+  if (vendorRetrying.value) return;
+  vendorRetrying.value = true;
+  try {
+    const ok = await runVendorGate();
+    if (ok) {
+      await finishBootAfterVendor();
+    }
+  } finally {
+    vendorRetrying.value = false;
+  }
 }
 
 const onVis = () => {
@@ -76,6 +160,16 @@ const onFocus = () => {
 };
 
 let unlistenFocus: (() => void) | undefined;
+/** Evita doble gate: boot con sesión + watch de login. */
+let vendorGateInFlight: Promise<boolean> | null = null;
+
+async function runVendorGateOnce(): Promise<boolean> {
+  if (vendorGateInFlight) return vendorGateInFlight;
+  vendorGateInFlight = runVendorGate().finally(() => {
+    vendorGateInFlight = null;
+  });
+  return vendorGateInFlight;
+}
 
 onMounted(() => {
   document.addEventListener("visibilitychange", onVis);
@@ -103,38 +197,22 @@ onMounted(() => {
 
     await auth.initialize();
 
-    // Si está autenticado, mostrar progreso de login y chequear vendor assets
     if (auth.isAuthenticated) {
       phase.value = "signingIn";
       await sleep(SIGNING_IN_MS);
 
-      // Chequear si necesitamos descargar vendor assets
-      try {
-        const vendorStatus = await checkVendorAssetStatus();
-        
-        if (!vendorStatus.allReady) {
-          // Mostrar pantalla de onboarding vendor
-          phase.value = "vendorOnboarding";
-          
-          await downloadAndInstallVendorAssets((p) => {
-            vendorProgress.value = p;
-          });
-          
-          // Pequeña pausa para mostrar completado
-          await sleep(800);
-        }
-      } catch (error) {
-        console.error("[Blaze] Error en vendor onboarding:", error);
-        vendorError.value = error instanceof Error ? error.message : String(error);
-        // Continuar de todas formas - el usuario puede hacer onboarding manual después
+      const vendorOk = await runVendorGateOnce();
+      if (!vendorOk) {
+        // Quedarse en vendorOnboarding con error + reintentar.
+        return;
       }
-    } else {
-      // Sin sesión, solo loading
-      phase.value = "loading";
-      await sleep(LOADING_MS);
+      await finishBootAfterVendor();
+      return;
     }
 
-    // Preparar runtimes (emuladores base)
+    phase.value = "loading";
+    await sleep(LOADING_MS);
+
     try {
       await ensureDefaultRuntimes();
       console.info("[Blaze] Runtimes listos (PCSX2 + RetroArch + Eden)");
@@ -145,6 +223,21 @@ onMounted(() => {
     phase.value = "ready";
   })();
 });
+
+// Login después del boot (pantalla de login): también debe bajar vendor assets.
+watch(
+  () => auth.isAuthenticated,
+  (authed, wasAuthed) => {
+    if (!authed || wasAuthed) return;
+    if (phase.value !== "ready" && phase.value !== "loading") return;
+
+    void (async () => {
+      const vendorOk = await runVendorGateOnce();
+      if (!vendorOk) return;
+      await finishBootAfterVendor();
+    })();
+  },
+);
 
 onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", onVis);
@@ -170,23 +263,31 @@ onBeforeUnmount(() => {
   <!-- Descargando vendor assets (BIOS/keys/firmware) -->
   <div v-else-if="phase === 'vendorOnboarding'" class="vendor-onboarding">
     <WindowChrome />
-    <BlazeLoader label="Preparando Blaze..." />
+    <BlazeLoader
+      :label="vendorError ? 'Preparación incompleta' : 'Descargando Blaze…'"
+    />
     <div class="vendor-progress">
-      <p v-if="vendorProgress" class="vendor-progress__asset">
-        {{ vendorProgress.assetName }}
-      </p>
       <div v-if="vendorProgress && !vendorError" class="vendor-progress-bar">
-        <div 
-          class="vendor-progress-bar__fill" 
+        <div
+          class="vendor-progress-bar__fill"
           :style="{ width: vendorProgressPercent + '%' }"
         ></div>
       </div>
-      <p v-if="vendorProgress" class="vendor-progress__message">
+      <p v-if="vendorProgress && !vendorError" class="vendor-progress__message">
         {{ vendorProgress.message }}
       </p>
       <p v-if="vendorError" class="vendor-progress__error">
         {{ vendorError }}
       </p>
+      <button
+        v-if="vendorError"
+        type="button"
+        class="vendor-progress__retry"
+        :disabled="vendorRetrying"
+        @click="retryVendorOnboarding"
+      >
+        {{ vendorRetrying ? "Reintentando…" : "Reintentar descarga" }}
+      </button>
     </div>
   </div>
 
@@ -245,7 +346,7 @@ onBeforeUnmount(() => {
 
 .vendor-progress {
   position: absolute;
-  bottom: 20%;
+  bottom: 16%;
   left: 50%;
   z-index: 2;
   width: 90%;
@@ -291,6 +392,29 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(239, 68, 68, 0.3);
   font-size: 0.75rem;
   color: #fca5a5;
+}
+
+.vendor-progress__retry {
+  margin-top: 0.85rem;
+  min-width: 160px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid #4a5563;
+  border-radius: 2px;
+  background: #2a3038;
+  color: #e8edf3;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vendor-progress__retry:hover:not(:disabled) {
+  background: #343b45;
+}
+
+.vendor-progress__retry:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Nav fija arriba; el scroll vive solo en el contenido (no pasa del header). */

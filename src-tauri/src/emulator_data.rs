@@ -86,7 +86,7 @@ impl LaunchPrepError {
             Self::KeysMissing { keys_dir } => RuntimeLaunchPlan {
                 arguments: vec![],
                 error: Some(format!(
-                    "Faltan keys de Switch (prod.keys) en {}. El instalador debería incluirlas; si faltan, pegá prod.keys ahí o reinstalá Blaze.",
+                    "Faltan keys de Switch (prod.keys) en {}. Blaze las descarga al iniciar sesión (onboarding). Cerrá y volvé a abrir Blaze logueado, o reintentá la preparación de emuladores.",
                     keys_dir.display()
                 )),
                 error_code: Some("KeysMissing".to_string()),
@@ -94,7 +94,7 @@ impl LaunchPrepError {
             Self::FirmwareMissing { firmware_dir } => RuntimeLaunchPlan {
                 arguments: vec![],
                 error: Some(format!(
-                    "Falta firmware de Switch en {}. El instalador debería incluirlo; si falta, importalo desde Configuración o reinstalá Blaze.",
+                    "Falta firmware de Switch en {}. Se descarga con el onboarding al iniciar sesión. Cerrá y volvé a abrir Blaze logueado, o reintentá la preparación.",
                     firmware_dir.display()
                 )),
                 error_code: Some("FirmwareMissing".to_string()),

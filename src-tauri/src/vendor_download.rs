@@ -191,6 +191,18 @@ pub async fn download_vendor_asset(
     // Limpiar archivo temporal
     let _ = fs::remove_file(&temp_file);
 
+    // Keys: si el 7z traía subcarpetas y quedó prod.keys anidado, subiéndolo a dest.
+    if matches!(asset_kind, VendorAssetKind::EdenKeys) {
+        promote_prod_keys_if_nested(&dest_dir)?;
+        let prod = dest_dir.join("prod.keys");
+        if !prod.is_file() {
+            return Err(VendorDownloadError::Io(
+                "Tras instalar keys no se encontró prod.keys en emulator-data/eden/keys"
+                    .into(),
+            ));
+        }
+    }
+
     // Tras instalar BIOS PS2: sembrar/parchear PCSX2.ini (SettingsVersion) para
     // no mostrar el setup wizard en el primer juego.
     if matches!(asset_kind, VendorAssetKind::Pcsx2Bios) {
@@ -206,6 +218,70 @@ pub async fn download_vendor_asset(
     }
 
     Ok(())
+}
+
+fn move_file_to(src: &Path, dest: &Path) -> Result<(), VendorDownloadError> {
+    if let Err(e) = fs::rename(src, dest) {
+        fs::copy(src, dest).map_err(|e2| {
+            VendorDownloadError::Io(format!("rename {e}; copy {e2}"))
+        })?;
+        let _ = fs::remove_file(src);
+    }
+    Ok(())
+}
+
+/// Si `prod.keys` quedó en un subdirectorio del extract, lo mueve a la raíz de keys.
+fn promote_prod_keys_if_nested(keys_dir: &Path) -> Result<(), VendorDownloadError> {
+    let direct = keys_dir.join("prod.keys");
+    if !direct.is_file() {
+        if let Some(src) = find_named_file_recursive(keys_dir, "prod.keys", 4)? {
+            move_file_to(&src, &direct)?;
+        }
+    }
+    let title_direct = keys_dir.join("title.keys");
+    if !title_direct.is_file() {
+        if let Some(src) = find_named_file_recursive(keys_dir, "title.keys", 4)? {
+            let _ = move_file_to(&src, &title_direct);
+        }
+    }
+    Ok(())
+}
+
+fn find_named_file_recursive(
+    root: &Path,
+    name: &str,
+    max_depth: u32,
+) -> Result<Option<PathBuf>, VendorDownloadError> {
+    fn walk(
+        dir: &Path,
+        name: &str,
+        depth: u32,
+        max_depth: u32,
+    ) -> Result<Option<PathBuf>, VendorDownloadError> {
+        if depth > max_depth {
+            return Ok(None);
+        }
+        let entries = fs::read_dir(dir).map_err(|e| VendorDownloadError::Io(e.to_string()))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.eq_ignore_ascii_case(name))
+                    .unwrap_or(false)
+            {
+                return Ok(Some(path));
+            }
+            if path.is_dir() {
+                if let Some(found) = walk(&path, name, depth + 1, max_depth)? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+        Ok(None)
+    }
+    walk(root, name, 0, max_depth)
 }
 
 /// Extrae un archivo vendor (7z o zip) al directorio destino
