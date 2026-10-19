@@ -30,6 +30,9 @@ const PCSX2_INI_SEED: &str = "\
 SettingsVersion=1
 SetupWizardIncomplete=false
 StartFullscreen=true
+[Hotkeys]
+ToggleFullscreen=Keyboard/Escape
+Exit=
 ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -263,9 +266,14 @@ pub fn seed_pcsx2_ini_if_missing(data_root: &Path) -> Result<(), LaunchPrepError
     fs::create_dir_all(data_root.join("bios")).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
     fs::create_dir_all(data_root.join("inis")).map_err(|e| LaunchPrepError::Io(e.to_string()))?;
     if !ini.is_file() {
-        return write_atomic(&ini, PCSX2_INI_SEED);
+        write_atomic(&ini, PCSX2_INI_SEED)?;
+    } else {
+        ensure_pcsx2_ini_settings_version(&ini)?;
     }
-    ensure_pcsx2_ini_settings_version(&ini)
+    // Escape = fullscreen; no Exit con Esc (también en installs viejos).
+    crate::emulator_full_config::apply_escape_hotkey_policy("pcsx2", &ini)
+        .map_err(|e| LaunchPrepError::Io(e))?;
+    Ok(())
 }
 
 /// PCSX2 2.8.2 exige `[UI] SettingsVersion=1` o dispara reset + wizard.
@@ -306,7 +314,14 @@ fn retroarch_cfg_seed(root: &Path) -> String {
          savefile_directory = \"{}\"\n\
          savestate_directory = \"{}\"\n\
          system_directory = \"{}\"\n\
-         core_assets_directory = \"{}\"\n",
+         core_assets_directory = \"{}\"\n\
+         video_fullscreen = \"true\"\n\
+         video_windowed_fullscreen = \"true\"\n\
+         input_toggle_fullscreen = \"escape\"\n\
+         input_exit_emulator = \"nul\"\n\
+         input_menu_toggle = \"f1\"\n\
+         input_desktop_menu_toggle = \"f1\"\n\
+         quit_press_twice = \"false\"\n",
         save.display(),
         states.display(),
         system.display(),
@@ -314,17 +329,19 @@ fn retroarch_cfg_seed(root: &Path) -> String {
     )
 }
 
-/// Siembra `retroarch.cfg` mínimo solo si no existe (managed). Sin claves cheevos_* ni libretro_directory.
+/// Siembra `retroarch.cfg` mínimo si no existe; siempre aplica política Escape de Blaze.
 pub fn seed_retroarch_cfg_if_missing(managed_root: &Path) -> Result<(), LaunchPrepError> {
     let cfg = managed_root.join("retroarch.cfg");
-    if cfg.is_file() {
-        return Ok(());
-    }
     for sub in ["saves", "states", "system", "assets"] {
         fs::create_dir_all(managed_root.join(sub))
             .map_err(|e| LaunchPrepError::Io(e.to_string()))?;
     }
-    write_atomic(&cfg, &retroarch_cfg_seed(managed_root))
+    if !cfg.is_file() {
+        write_atomic(&cfg, &retroarch_cfg_seed(managed_root))?;
+    }
+    crate::emulator_full_config::apply_escape_hotkey_policy("retroarch", &cfg)
+        .map_err(|e| LaunchPrepError::Io(e))?;
+    Ok(())
 }
 
 pub fn ensure_managed_data_layout(
@@ -709,6 +726,14 @@ pub fn prepare_runtime_launch(
                 return e.into_launch_plan();
             }
         }
+        // Escape = salir de fullscreen (qt-config portable junto al exe).
+        let eden_ini = exe
+            .parent()
+            .unwrap_or(exe.as_path())
+            .join("user")
+            .join("config")
+            .join("qt-config.ini");
+        let _ = crate::emulator_full_config::apply_escape_hotkey_policy("eden", &eden_ini);
     }
 
     // PCSX2 managed: sembrar BIOS del instalador antes de validar.

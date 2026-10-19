@@ -498,7 +498,8 @@ fn write_eden_video(path: &Path, fullscreen: bool, resolution_scale: u32) -> Res
             ("resolution_factor", factor),
         ],
     );
-    fs::write(path, next).map_err(|e| e.to_string())
+    fs::write(path, &next).map_err(|e| e.to_string())?;
+    crate::emulator_full_config::apply_escape_hotkey_policy("eden", path)
 }
 
 fn read_pcsx2_video(path: &Path) -> RuntimeVideoSettings {
@@ -552,7 +553,8 @@ fn write_pcsx2_video(path: &Path, fullscreen: bool, resolution_scale: u32) -> Re
         "EmuCore/GS",
         &[("upscale_multiplier", scale)],
     );
-    fs::write(path, next).map_err(|e| e.to_string())
+    fs::write(path, &next).map_err(|e| e.to_string())?;
+    crate::emulator_full_config::apply_escape_hotkey_policy("pcsx2", path)
 }
 
 fn retroarch_core_options_path(cfg_path: &Path) -> PathBuf {
@@ -623,6 +625,7 @@ fn write_retroarch_video(
     ];
     let next = cfg_set(&existing, &pairs);
     fs::write(cfg_path, next).map_err(|e| e.to_string())?;
+    crate::emulator_full_config::apply_escape_hotkey_policy("retroarch", cfg_path)?;
 
     // Escala interna del core PS1 (SwanStation / Beetle).
     let core_path = retroarch_core_options_path(cfg_path);

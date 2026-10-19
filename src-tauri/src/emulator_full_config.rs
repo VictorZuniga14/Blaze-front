@@ -57,8 +57,10 @@ impl Default for EmulatorConfig {
             hotkey_save_state: "F1".into(),
             hotkey_load_state: "F3".into(),
             hotkey_pause: "Pause".into(),
-            hotkey_exit: "Escape".into(),
-            hotkey_fullscreen: "Alt+Enter".into(),
+            // Salir solo desde Blaze o cerrando la ventana por fuera — Escape no cierra.
+            hotkey_exit: "".into(),
+            // Escape solo sale de fullscreen; el juego sigue.
+            hotkey_fullscreen: "Escape".into(),
         }
     }
 }
@@ -249,13 +251,23 @@ fn apply_pcsx2_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), String> {
         ("FinalVolume", &cfg.volume.to_string()),
     ]);
 
-    // Hotkeys (simplificado)
-    content = ini_set_section(&content, "Hotkeys", &[
-        ("ToggleFullscreen", "Keyboard/Alt & Keyboard/Return"),
-        ("Exit", "Keyboard/Escape"),
-    ]);
+    // Escape = solo fullscreen. Exit sin tecla (cerrar desde Blaze / por fuera).
+    content = apply_pcsx2_escape_hotkeys(&content);
 
     fs::write(path, content).map_err(|e| e.to_string())
+}
+
+/// PCSX2: Escape → ToggleFullscreen; Exit sin bind (no menú / no cerrar con Esc).
+fn apply_pcsx2_escape_hotkeys(content: &str) -> String {
+    ini_set_section(
+        content,
+        "Hotkeys",
+        &[
+            ("ToggleFullscreen", "Keyboard/Escape"),
+            // Vacío = sin atajo. Alt+Enter queda libre; Blaze es quien cierra el juego.
+            ("Exit", ""),
+        ],
+    )
 }
 
 fn apply_retroarch_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), String> {
@@ -291,6 +303,7 @@ fn apply_retroarch_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), Strin
     let pairs = [
         // Video
         ("video_fullscreen", if cfg.fullscreen { "true" } else { "false" }.to_string()),
+        ("video_windowed_fullscreen", "true".to_string()),
         ("video_driver", video_driver.to_string()),
         ("video_vsync", if cfg.vsync { "true" } else { "false" }.to_string()),
         ("fps_show", if cfg.show_fps { "true" } else { "false" }.to_string()),
@@ -316,8 +329,21 @@ fn apply_retroarch_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), Strin
         ("video_font_enable", if cfg.show_notifications { "true" } else { "false" }.to_string()),
     ];
 
-    let content = cfg_set_multiple(&existing, &pairs);
+    let mut content = cfg_set_multiple(&existing, &pairs);
+    content = apply_retroarch_escape_hotkeys(&content);
     fs::write(path, content).map_err(|e| e.to_string())
+}
+
+/// RetroArch: Escape → fullscreen; sin exit/menú con Escape.
+fn apply_retroarch_escape_hotkeys(content: &str) -> String {
+    let pairs = [
+        ("input_toggle_fullscreen", "escape".to_string()),
+        ("input_exit_emulator", "nul".to_string()),
+        ("input_menu_toggle", "f1".to_string()),
+        ("input_desktop_menu_toggle", "f1".to_string()),
+        ("quit_press_twice", "false".to_string()),
+    ];
+    cfg_set_multiple(content, &pairs)
 }
 
 fn apply_eden_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), String> {
@@ -362,7 +388,58 @@ fn apply_eden_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), String> {
         ("volume", &((cfg.volume as f32 / 100.0).to_string())),
     ]);
 
+    content = apply_eden_escape_hotkeys(&content);
+
     fs::write(path, content).map_err(|e| e.to_string())
+}
+
+/// Eden/yuzu: Escape = Exit Fullscreen; Exit del emulador sin Esc.
+fn apply_eden_escape_hotkeys(content: &str) -> String {
+    let mut next = content.to_string();
+    // Formato Qt de yuzu/suyu/Eden (secciones con backslash).
+    next = ini_set_section(
+        &next,
+        r"UI\Shortcuts\Exit Fullscreen",
+        &[("KeySeq", "Esc"), (r"KeySeq\default", "Esc")],
+    );
+    next = ini_set_section(
+        &next,
+        r"UI\Shortcuts\Fullscreen",
+        &[("KeySeq", "F11"), (r"KeySeq\default", "F11")],
+    );
+    // Cerrar emulador: Ctrl+Q (no Escape). Salir real = Blaze / cerrar ventana.
+    next = ini_set_section(
+        &next,
+        r"UI\Shortcuts\Exit",
+        &[("KeySeq", "Ctrl+Q"), (r"KeySeq\default", "Ctrl+Q")],
+    );
+    next
+}
+
+/// Aplica la política Escape de Blaze sobre el archivo de config del runtime.
+/// Llamar en cada launch para sobrescribir defaults del emulador / installs viejos.
+pub fn apply_escape_hotkey_policy(
+    runtime_kind: &str,
+    config_path: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let existing = if config_path.is_file() {
+        fs::read_to_string(config_path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+    let next = match runtime_kind {
+        "pcsx2" => apply_pcsx2_escape_hotkeys(&existing),
+        "retroarch" => apply_retroarch_escape_hotkeys(&existing),
+        "eden" => apply_eden_escape_hotkeys(&existing),
+        _ => return Ok(()),
+    };
+    if next != existing {
+        fs::write(config_path, next).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 // Helper functions para manipular INI
