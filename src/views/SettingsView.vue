@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -17,6 +17,24 @@ import {
   openManagedPcsx2BiosFolder,
   type EmulatorSetupStatus,
 } from "../services/emulatorData.service";
+import {
+  controllerPrefsService,
+  type ControllerLayout,
+} from "../services/controllerPrefs.service";
+import {
+  runtimeConfigService,
+  type GameControllerInfo,
+} from "../services/runtimeConfig.service";
+import {
+  emulationPrefsService,
+  type EmulationKindPrefs,
+  type EmulationRuntimeKind,
+} from "../services/emulationPrefs.service";
+import {
+  getEmulatorConfigCapabilities,
+  RENDERER_OPTIONS,
+  type EmulatorConfigCapabilities,
+} from "../services/emulatorConfigService";
 
 const router = useRouter();
 const ra = usePcsx2RaStore();
@@ -30,11 +48,167 @@ const emuSetup = ref<EmulatorSetupStatus | null>(null);
 const emuBusy = ref(false);
 const emuMessage = ref<string | null>(null);
 
+const controllers = ref<GameControllerInfo[]>([]);
+const controllersBusy = ref(false);
+const controllerLayout = ref<ControllerLayout>("auto");
+const preferredGuid = ref<string>("");
+const controllerMsg = ref<string | null>(null);
+const controllerErr = ref<string | null>(null);
+const testPadBusy = ref(false);
+
+const emuKind = ref<EmulationRuntimeKind>("pcsx2");
+const emuForm = ref<EmulationKindPrefs>({
+  fullscreen: true,
+  resolutionScale: 2,
+  renderer: "d3d11",
+  vsync: true,
+  audioEngine: "xaudio2",
+  volume: 80,
+});
+const emuCaps = ref<EmulatorConfigCapabilities | null>(null);
+const emuAll = ref<Record<EmulationRuntimeKind, EmulationKindPrefs> | null>(
+  null,
+);
+const emuSaveMsg = ref<string | null>(null);
+const emuSaveErr = ref<string | null>(null);
+const emuSaveBusy = ref(false);
+
+const rendererOptions = computed(() => RENDERER_OPTIONS[emuKind.value] ?? []);
+
+const scaleOptions = computed(() => {
+  const max = emuCaps.value?.maxResolutionScale ?? 4;
+  return Array.from({ length: max }, (_, i) => i + 1);
+});
+
+const audioEngineOptions = computed(() => {
+  if (emuKind.value === "pcsx2") {
+    return [
+      { value: "xaudio2", label: "XAudio2" },
+      { value: "wasapi", label: "WASAPI" },
+      { value: "auto", label: "Auto" },
+    ];
+  }
+  if (emuKind.value === "retroarch") {
+    return [
+      { value: "wasapi", label: "WASAPI" },
+      { value: "xaudio2", label: "XAudio" },
+      { value: "auto", label: "Auto" },
+    ];
+  }
+  return [{ value: "auto", label: "Sistema (Eden)" }];
+});
+
 onMounted(() => {
   void ra.refresh();
   void loadApiStatus();
   void loadEmuSetup();
+  void loadControllersSection();
+  void loadEmulationSection();
 });
+
+async function loadControllersSection() {
+  controllersBusy.value = true;
+  controllerErr.value = null;
+  try {
+    const prefs = await controllerPrefsService.get();
+    controllerLayout.value = prefs.layout;
+    preferredGuid.value = prefs.preferredDeviceGuid ?? "";
+    controllers.value = await runtimeConfigService.listControllers();
+  } catch (e) {
+    controllerErr.value =
+      e instanceof Error ? e.message : "No se pudieron listar los mandos.";
+    controllers.value = [];
+  } finally {
+    controllersBusy.value = false;
+  }
+}
+
+async function saveControllerPrefs() {
+  controllerMsg.value = null;
+  controllerErr.value = null;
+  try {
+    await controllerPrefsService.set({
+      layout: controllerLayout.value,
+      preferredDeviceGuid: preferredGuid.value.trim() || null,
+    });
+    controllerMsg.value = "Preferencias de mando guardadas.";
+    await loadControllersSection();
+  } catch (e) {
+    controllerErr.value =
+      e instanceof Error ? e.message : "No se pudieron guardar las preferencias.";
+  }
+}
+
+async function testPreferredPad() {
+  testPadBusy.value = true;
+  controllerMsg.value = null;
+  controllerErr.value = null;
+  try {
+    controllerMsg.value = "Mové un stick o apretá un botón (4 s)…";
+    const ok = await controllerPrefsService.testPad(
+      preferredGuid.value.trim() || null,
+    );
+    controllerMsg.value = ok
+      ? "Mando OK: Blaze recibió input."
+      : "Sin input. Reconectá el USB o cerrá Steam Input.";
+  } catch (e) {
+    controllerErr.value =
+      e instanceof Error ? e.message : "No se pudo probar el mando.";
+  } finally {
+    testPadBusy.value = false;
+  }
+}
+
+function controllerKindLabel(kind: string | undefined): string {
+  if (kind === "playstation") return "PlayStation";
+  if (kind === "xbox") return "Xbox";
+  return "";
+}
+
+async function loadEmulationSection() {
+  emuSaveErr.value = null;
+  try {
+    const all = await emulationPrefsService.get();
+    emuAll.value = all;
+    await selectEmuKind(emuKind.value);
+  } catch (e) {
+    emuSaveErr.value =
+      e instanceof Error ? e.message : "No se pudo cargar Emulación.";
+  }
+}
+
+async function selectEmuKind(kind: EmulationRuntimeKind) {
+  emuKind.value = kind;
+  emuSaveMsg.value = null;
+  try {
+    emuCaps.value = await getEmulatorConfigCapabilities(kind);
+  } catch {
+    emuCaps.value = null;
+  }
+  if (!emuAll.value) {
+    emuAll.value = await emulationPrefsService.get();
+  }
+  emuForm.value = { ...emuAll.value[kind] };
+}
+
+async function saveEmulationPrefs() {
+  emuSaveBusy.value = true;
+  emuSaveMsg.value = null;
+  emuSaveErr.value = null;
+  try {
+    const all = emuAll.value ?? (await emulationPrefsService.get());
+    all[emuKind.value] = { ...emuForm.value };
+    emuAll.value = all;
+    await emulationPrefsService.set(all);
+    emuSaveMsg.value =
+      "Emulación guardada. Se aplica al jugar (y ya a configs managed).";
+  } catch (e) {
+    emuSaveErr.value =
+      e instanceof Error ? e.message : "No se pudo guardar Emulación.";
+  } finally {
+    emuSaveBusy.value = false;
+  }
+}
 
 async function loadEmuSetup() {
   try {
@@ -170,6 +344,198 @@ function entryDot(statusCode: string): string {
         <span v-if="user.email" class="text-slate-500"> ({{ user.email }})</span>
       </p>
       <p v-else class="text-sm text-slate-400">Sin sesión.</p>
+    </section>
+
+    <section class="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-6">
+      <h2 class="mb-1 text-lg font-medium text-white">Emulación</h2>
+      <p class="mb-4 text-sm text-slate-400">
+        Fuente de verdad al jugar. Se escribe en el emulador antes de cada
+        partida — sin abrir su ventana.
+      </p>
+      <p v-if="emuSaveErr" class="mb-3 text-sm text-rose-300">{{ emuSaveErr }}</p>
+      <p v-if="emuSaveMsg" class="mb-3 text-sm text-emerald-300">{{ emuSaveMsg }}</p>
+
+      <div class="mb-4 flex flex-wrap gap-2">
+        <button
+          v-for="k in (['pcsx2', 'retroarch', 'eden'] as const)"
+          :key="k"
+          type="button"
+          class="rounded-lg px-3 py-1.5 text-sm"
+          :class="
+            emuKind === k
+              ? 'bg-sky-500 text-slate-950'
+              : 'border border-white/10 text-slate-200 hover:bg-white/5'
+          "
+          @click="selectEmuKind(k)"
+        >
+          {{ kindLabel(k) }}
+        </button>
+      </div>
+
+      <label class="mb-3 flex items-center gap-2 text-sm text-slate-300">
+        <input v-model="emuForm.fullscreen" type="checkbox" class="rounded" />
+        Pantalla completa al jugar
+      </label>
+
+      <label class="mb-3 block text-sm text-slate-300">
+        Escala
+        <select
+          v-model.number="emuForm.resolutionScale"
+          class="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white"
+        >
+          <option v-for="s in scaleOptions" :key="s" :value="s">
+            {{ s === 1 ? "Nativa (1x)" : `${s}x` }}
+          </option>
+        </select>
+      </label>
+
+      <label class="mb-3 block text-sm text-slate-300">
+        Renderer
+        <select
+          v-model="emuForm.renderer"
+          class="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white"
+        >
+          <option
+            v-for="opt in rendererOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >
+            {{ opt.label }}
+          </option>
+        </select>
+      </label>
+
+      <label class="mb-3 flex items-center gap-2 text-sm text-slate-300">
+        <input v-model="emuForm.vsync" type="checkbox" class="rounded" />
+        VSync
+      </label>
+
+      <label
+        v-if="emuKind !== 'eden'"
+        class="mb-3 block text-sm text-slate-300"
+      >
+        Audio
+        <select
+          v-model="emuForm.audioEngine"
+          class="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white"
+        >
+          <option
+            v-for="opt in audioEngineOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >
+            {{ opt.label }}
+          </option>
+        </select>
+      </label>
+
+      <label class="mb-4 block text-sm text-slate-300">
+        Volumen ({{ emuForm.volume }})
+        <input
+          v-model.number="emuForm.volume"
+          type="range"
+          min="0"
+          max="100"
+          class="mt-1 w-full"
+        />
+      </label>
+
+      <button
+        type="button"
+        class="rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-50"
+        :disabled="emuSaveBusy"
+        @click="saveEmulationPrefs"
+      >
+        {{ emuSaveBusy ? "Guardando…" : "Guardar emulación" }}
+      </button>
+    </section>
+
+    <section class="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-6">
+      <h2 class="mb-1 text-lg font-medium text-white">Mandos</h2>
+      <p class="mb-4 text-sm text-slate-400">
+        Detección HID + Xbox (DualShock por USB). PCSX2/RetroArch usan SDL al
+        lanzar. Eden: conectá y jugá (sin abrir el emulador).
+      </p>
+      <p v-if="controllerErr" class="mb-3 text-sm text-rose-300">{{ controllerErr }}</p>
+      <p v-if="controllerMsg" class="mb-3 text-sm text-emerald-300">{{ controllerMsg }}</p>
+
+      <div class="mb-4">
+        <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+          Detectados
+        </p>
+        <ul
+          v-if="controllers.length"
+          class="mb-2 space-y-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-200"
+        >
+          <li v-for="c in controllers" :key="c.id">
+            {{ c.name }}
+            <span
+              v-if="controllerKindLabel(c.kind)"
+              class="text-slate-500"
+            >
+              · {{ controllerKindLabel(c.kind) }}
+            </span>
+          </li>
+        </ul>
+        <button
+          type="button"
+          class="text-xs text-sky-300 hover:text-sky-200 disabled:opacity-50"
+          :disabled="controllersBusy"
+          @click="loadControllersSection"
+        >
+          {{ controllersBusy ? "Buscando…" : "Actualizar lista" }}
+        </button>
+        <p class="mt-2 text-xs text-slate-500">
+          Si no aparece el PS4/PS5, cerrá Steam (Steam Input) y reconectá el USB.
+        </p>
+      </div>
+
+      <label class="mb-3 block text-sm text-slate-300">
+        Layout preferido
+        <select
+          v-model="controllerLayout"
+          class="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white"
+        >
+          <option value="auto">Automático</option>
+          <option value="playstation">PlayStation</option>
+          <option value="xbox">Xbox</option>
+        </select>
+      </label>
+
+      <label class="mb-4 block text-sm text-slate-300">
+        Mando principal
+        <select
+          v-model="preferredGuid"
+          class="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white"
+        >
+          <option value="">Primero detectado</option>
+          <option
+            v-for="c in controllers.filter((x) => x.id !== 'none')"
+            :key="c.id"
+            :value="c.guid || c.id"
+          >
+            {{ c.name }}
+          </option>
+        </select>
+      </label>
+
+      <div class="mb-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          class="rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-sky-400"
+          @click="saveControllerPrefs"
+        >
+          Guardar mandos
+        </button>
+        <button
+          type="button"
+          class="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/5 disabled:opacity-50"
+          :disabled="testPadBusy"
+          @click="testPreferredPad"
+        >
+          {{ testPadBusy ? "Escuchando…" : "Probar mando" }}
+        </button>
+      </div>
     </section>
 
     <section class="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-6">

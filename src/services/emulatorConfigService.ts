@@ -20,7 +20,7 @@ export interface EmulatorConfig {
   audioDevice: string;
   volume: number;
   
-  // Controles
+  /** auto | playstation | xbox */
   controllerProfile: string;
   
   // UI
@@ -127,11 +127,34 @@ export async function ensureEmulatorConfigured(
   configPath: string
 ): Promise<void> {
   const kind = getEmulatorRuntimeKind(runtimeType);
-  
-  // TODO: Verificar si existe config
-  // Por ahora, siempre aplicamos defaults
-  const defaults = await getDefaultEmulatorConfig(kind);
-  await applyEmulatorConfig(configPath, defaults);
+  let config = await getDefaultEmulatorConfig(kind);
+  try {
+    const { emulationPrefsService } = await import("./emulationPrefs.service");
+    const { controllerPrefsService } = await import("./controllerPrefs.service");
+    const all = await emulationPrefsService.get();
+    const slice =
+      kind === "pcsx2"
+        ? all.pcsx2
+        : kind === "eden"
+          ? all.eden
+          : all.retroarch;
+    if (slice) {
+      config = {
+        ...config,
+        fullscreen: slice.fullscreen,
+        resolutionScale: slice.resolutionScale,
+        renderer: slice.renderer,
+        vsync: slice.vsync,
+        audioEngine: slice.audioEngine,
+        volume: slice.volume,
+      };
+    }
+    const pad = await controllerPrefsService.get();
+    config.controllerProfile = pad.layout;
+  } catch {
+    // defaults
+  }
+  await applyEmulatorConfig(configPath, config);
 }
 
 // Valores por defecto sensatos (documentación)

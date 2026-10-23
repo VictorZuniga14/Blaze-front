@@ -6,6 +6,7 @@ import { runtimeRepository } from "../repositories/runtime.repository";
 import { isEdenRuntime, resolveRuntimeKind } from "./ra/adapterKind";
 import { resolveRetroArchLaunchArguments } from "../utils/platformRuntime";
 import { runtimeConfigService } from "./runtimeConfig.service";
+import { controllerPrefsService } from "./controllerPrefs.service";
 import type {
   ActiveProcess,
   LastProcessResult,
@@ -101,6 +102,19 @@ export const launchService = {
         } catch {
           // Si no hay config de video, mantener fullscreen por defecto.
         }
+      }
+
+      // Perfil completo (Emulación + mandos) lo aplica Rust en prepare_runtime_launch.
+      try {
+        const prefs = await controllerPrefsService.get();
+        await invoke("save_controller_prefs_file", {
+          prefs: {
+            layout: prefs.layout,
+            preferredDeviceGuid: prefs.preferredDeviceGuid,
+          },
+        });
+      } catch {
+        // best-effort
       }
 
       const launchPlan = await invoke<{

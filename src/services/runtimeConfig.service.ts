@@ -1,7 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type AudioDeviceInfo = { id: string; name: string };
-export type GameControllerInfo = { id: string; name: string };
+export type GameControllerInfo = {
+  id: string;
+  name: string;
+  guid?: string;
+  /** playstation | xbox | generic */
+  kind?: string;
+};
 export type RuntimeAudioSettings = {
   runtimeKind: string;
   outputEngine: string;

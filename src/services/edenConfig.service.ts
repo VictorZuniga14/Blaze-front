@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type AudioDeviceInfo = { id: string; name: string };
-export type GameControllerInfo = { id: string; name: string };
+export type GameControllerInfo = {
+  id: string;
+  name: string;
+  guid?: string;
+  kind?: string;
+};
 export type EdenAudioSettings = {
   outputEngine: string;
   outputDevice: string;

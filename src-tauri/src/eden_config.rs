@@ -20,13 +20,6 @@ pub struct AudioDeviceInfo {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GameControllerInfo {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RuntimeAudioSettings {
     pub runtime_kind: String,
     pub output_engine: String,
@@ -711,33 +704,6 @@ pub fn list_audio_output_devices() -> Result<Vec<AudioDeviceInfo>, String> {
         });
     }
     Ok(devices)
-}
-
-#[tauri::command]
-pub fn list_game_controllers() -> Result<Vec<GameControllerInfo>, String> {
-    let mut out = Vec::new();
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::UI::Input::XboxController::{XInputGetState, XINPUT_STATE};
-        for i in 0u32..4 {
-            unsafe {
-                let mut state: XINPUT_STATE = std::mem::zeroed();
-                if XInputGetState(i, &mut state) == 0 {
-                    out.push(GameControllerInfo {
-                        id: format!("xinput-{i}"),
-                        name: format!("Controlador XInput {i}"),
-                    });
-                }
-            }
-        }
-    }
-    if out.is_empty() {
-        out.push(GameControllerInfo {
-            id: "none".into(),
-            name: "Ningún mando XInput detectado".into(),
-        });
-    }
-    Ok(out)
 }
 
 #[tauri::command]

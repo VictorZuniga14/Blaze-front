@@ -30,6 +30,13 @@ const PCSX2_INI_SEED: &str = "\
 SettingsVersion=1
 SetupWizardIncomplete=false
 StartFullscreen=true
+[InputSources]
+SDL=true
+XInput=true
+Keyboard=true
+Mouse=true
+[Pad1]
+Type=DualShock2
 [Hotkeys]
 ToggleFullscreen=Keyboard/Escape
 Exit=
@@ -273,6 +280,8 @@ pub fn seed_pcsx2_ini_if_missing(data_root: &Path) -> Result<(), LaunchPrepError
     // Escape = fullscreen; no Exit con Esc (también en installs viejos).
     crate::emulator_full_config::apply_escape_hotkey_policy("pcsx2", &ini)
         .map_err(|e| LaunchPrepError::Io(e))?;
+    crate::emulator_full_config::apply_input_backend_policy("pcsx2", &ini, "auto")
+        .map_err(|e| LaunchPrepError::Io(e))?;
     Ok(())
 }
 
@@ -319,9 +328,11 @@ fn retroarch_cfg_seed(root: &Path) -> String {
          video_windowed_fullscreen = \"true\"\n\
          input_toggle_fullscreen = \"escape\"\n\
          input_exit_emulator = \"nul\"\n\
-         input_menu_toggle = \"f1\"\n\
-         input_desktop_menu_toggle = \"f1\"\n\
-         quit_press_twice = \"false\"\n",
+         input_menu_toggle = \"nul\"\n\
+         input_desktop_menu_toggle = \"nul\"\n\
+         quit_press_twice = \"false\"\n\
+         input_joypad_driver = \"sdl2\"\n\
+         input_autodetect_enable = \"true\"\n",
         save.display(),
         states.display(),
         system.display(),
@@ -340,6 +351,8 @@ pub fn seed_retroarch_cfg_if_missing(managed_root: &Path) -> Result<(), LaunchPr
         write_atomic(&cfg, &retroarch_cfg_seed(managed_root))?;
     }
     crate::emulator_full_config::apply_escape_hotkey_policy("retroarch", &cfg)
+        .map_err(|e| LaunchPrepError::Io(e))?;
+    crate::emulator_full_config::apply_input_backend_policy("retroarch", &cfg, "auto")
         .map_err(|e| LaunchPrepError::Io(e))?;
     Ok(())
 }
@@ -734,6 +747,13 @@ pub fn prepare_runtime_launch(
             .join("config")
             .join("qt-config.ini");
         let _ = crate::emulator_full_config::apply_escape_hotkey_policy("eden", &eden_ini);
+        crate::blaze_prefs::apply_launch_profile(
+            &app,
+            "eden",
+            &exe,
+            None,
+            None,
+        );
     }
 
     // PCSX2 managed: sembrar BIOS del instalador antes de validar.
@@ -746,6 +766,26 @@ pub fn prepare_runtime_launch(
                 &bios_dir,
             );
         }
+    }
+
+    // Perfil Blaze (Settings Emulación + mandos) → INI/CFG antes de spawn.
+    let launch_kind = if type_key == "eden" {
+        "eden"
+    } else if type_key.contains("retro") || kind == "retroarch" {
+        "retroarch"
+    } else if type_key.contains("pcsx") || kind == "pcsx2" {
+        "pcsx2"
+    } else {
+        kind
+    };
+    if launch_kind != "eden" {
+        crate::blaze_prefs::apply_launch_profile(
+            &app,
+            launch_kind,
+            &exe,
+            paths.pcsx2_data_root.as_deref(),
+            paths.retroarch_cfg.as_deref(),
+        );
     }
 
     match build_managed_launch_arguments(

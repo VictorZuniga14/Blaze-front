@@ -23,8 +23,8 @@ pub struct EmulatorConfig {
     pub audio_device: String,   // "auto" o nombre del dispositivo
     pub volume: u32,            // 0-100
     
-    // Controles
-    pub controller_profile: String,  // "default", "custom"
+    // Controles: layout preferido `auto` | `playstation` | `xbox` (antes default/custom)
+    pub controller_profile: String,
     
     // UI
     pub ui_language: String,    // "es", "en", "auto"
@@ -50,7 +50,7 @@ impl Default for EmulatorConfig {
             audio_engine: "auto".into(),
             audio_device: "auto".into(),
             volume: 80,
-            controller_profile: "default".into(),
+            controller_profile: "auto".into(),
             ui_language: "es".into(),
             show_fps: false,
             show_notifications: true,
@@ -253,8 +253,30 @@ fn apply_pcsx2_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), String> {
 
     // Escape = solo fullscreen. Exit sin tecla (cerrar desde Blaze / por fuera).
     content = apply_pcsx2_escape_hotkeys(&content);
+    content = apply_pcsx2_input_backends(&content, &cfg.controller_profile);
 
     fs::write(path, content).map_err(|e| e.to_string())
+}
+
+/// Activa SDL + XInput y Pad1 DualShock2 (la consola emulada siempre es DS2).
+fn apply_pcsx2_input_backends(content: &str, layout: &str) -> String {
+    let _ = layout; // layout guía preferencia en UI; PCSX2 recibe el pad vía SDL.
+    let mut next = ini_set_section(
+        content,
+        "InputSources",
+        &[
+            ("SDL", "true"),
+            ("XInput", "true"),
+            ("Keyboard", "true"),
+            ("Mouse", "true"),
+        ],
+    );
+    next = ini_set_section(
+        &next,
+        "Pad1",
+        &[("Type", "DualShock2")],
+    );
+    next
 }
 
 /// PCSX2: Escape → ToggleFullscreen; Exit sin bind (no menú / no cerrar con Esc).
@@ -331,16 +353,27 @@ fn apply_retroarch_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), Strin
 
     let mut content = cfg_set_multiple(&existing, &pairs);
     content = apply_retroarch_escape_hotkeys(&content);
+    content = apply_retroarch_input_backends(&content, &cfg.controller_profile);
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
-/// RetroArch: Escape → fullscreen; sin exit/menú con Escape.
+fn apply_retroarch_input_backends(content: &str, layout: &str) -> String {
+    let _ = layout;
+    let pairs = [
+        ("input_joypad_driver", "sdl2".to_string()),
+        ("input_autodetect_enable", "true".to_string()),
+        ("input_auto_game_focus", "1".to_string()),
+    ];
+    cfg_set_multiple(content, &pairs)
+}
+
+/// RetroArch: Escape → fullscreen; sin exit; sin menú nativo (F1 / desktop).
 fn apply_retroarch_escape_hotkeys(content: &str) -> String {
     let pairs = [
         ("input_toggle_fullscreen", "escape".to_string()),
         ("input_exit_emulator", "nul".to_string()),
-        ("input_menu_toggle", "f1".to_string()),
-        ("input_desktop_menu_toggle", "f1".to_string()),
+        ("input_menu_toggle", "nul".to_string()),
+        ("input_desktop_menu_toggle", "nul".to_string()),
         ("quit_press_twice", "false".to_string()),
     ];
     cfg_set_multiple(content, &pairs)
@@ -434,6 +467,34 @@ pub fn apply_escape_hotkey_policy(
         "pcsx2" => apply_pcsx2_escape_hotkeys(&existing),
         "retroarch" => apply_retroarch_escape_hotkeys(&existing),
         "eden" => apply_eden_escape_hotkeys(&existing),
+        _ => return Ok(()),
+    };
+    if next != existing {
+        fs::write(config_path, next).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Activa backends de mando (SDL) en PCSX2/RetroArch. Eden: no-op (UI nativa).
+/// `layout`: auto | playstation | xbox
+pub fn apply_input_backend_policy(
+    runtime_kind: &str,
+    config_path: &Path,
+    layout: &str,
+) -> Result<(), String> {
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let existing = if config_path.is_file() {
+        fs::read_to_string(config_path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+    let profile = if layout.is_empty() { "auto" } else { layout };
+    let next = match runtime_kind {
+        "pcsx2" => apply_pcsx2_input_backends(&existing, profile),
+        "retroarch" => apply_retroarch_input_backends(&existing, profile),
+        "eden" => return Ok(()),
         _ => return Ok(()),
     };
     if next != existing {

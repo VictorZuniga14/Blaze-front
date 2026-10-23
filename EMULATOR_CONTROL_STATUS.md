@@ -179,7 +179,7 @@
 **No soportado:**
 - ❌ Audio engine: Usa audio del sistema
 - ❌ Hotkeys: No configurables en v0.2.1
-- ❌ Controller profiles: No configurables
+- ❌ Controller profiles: No configurables desde Blaze (usar UI nativa Eden; detección HID sí en Configuración → Mandos)
 - ❌ IPC: Sin API de control en v0.2.1
 - ❌ Pause: Solo via kill/resume proceso (no implementado)
 - ❌ Save states: No disponible via IPC

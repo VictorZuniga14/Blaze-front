@@ -43,6 +43,8 @@ windows-sys = { version = "0.59", features = [
   "Win32_UI_Input_XboxController",
 ] }
 cpal = "0.15"
+# Detección HID + XInput (DualShock/Xbox) sin empacar SDL2.dll; los emuladores usan SDL en su config.
+gilrs = "0.11"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

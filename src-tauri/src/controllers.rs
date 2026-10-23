@@ -1,0 +1,204 @@
+//! Detección de mandos (HID + XInput vía gilrs).
+//! DualShock/DualSense aparecen aquí; XInput-only los dejaba invisibles.
+
+use crate::emulator_data::{
+    app_data_dir, managed_data_root, pcsx2_internal_data_root,
+};
+use crate::emulator_full_config::apply_input_backend_policy;
+use gilrs::{EventType, Gilrs};
+use serde::Serialize;
+use tauri::AppHandle;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameControllerInfo {
+    pub id: String,
+    pub name: String,
+    /// Identificador estable del dispositivo (uuid gilrs / slot).
+    pub guid: String,
+    /// `playstation` | `xbox` | `generic`
+    pub kind: String,
+}
+
+fn classify_kind(name: &str) -> String {
+    let n = name.to_ascii_lowercase();
+    if n.contains("dualshock")
+        || n.contains("dualsense")
+        || n.contains("wireless controller")
+        || n.contains("sony")
+        || n.contains("playstation")
+        || n.contains("ps4")
+        || n.contains("ps5")
+        || n.contains("ps3")
+    {
+        return "playstation".into();
+    }
+    if n.contains("xbox")
+        || n.contains("xinput")
+        || n.contains("microsoft")
+        || n.contains("360 controller")
+        || n.contains("one controller")
+    {
+        return "xbox".into();
+    }
+    "generic".into()
+}
+
+/// Lista mandos conectados. Vacío → un ítem informativo (no error).
+#[tauri::command]
+pub fn list_game_controllers() -> Result<Vec<GameControllerInfo>, String> {
+    let mut out = match list_via_gilrs() {
+        Ok(list) => list,
+        Err(e) => {
+            // Fallback XInput si gilrs falla al init.
+            let xinput = list_via_xinput();
+            if xinput.is_empty() {
+                return Ok(vec![GameControllerInfo {
+                    id: "none".into(),
+                    name: format!(
+                        "Ningún mando detectado ({e}). Si usás PS4/PS5, cerrá Steam Input o reconectá el USB."
+                    ),
+                    guid: "".into(),
+                    kind: "generic".into(),
+                }]);
+            }
+            xinput
+        }
+    };
+
+    if out.is_empty() {
+        // Mezclar XInput por si gilrs no vio pads Xbox-only.
+        let xinput = list_via_xinput();
+        for pad in xinput {
+            if !out.iter().any(|p| p.id == pad.id || p.name == pad.name) {
+                out.push(pad);
+            }
+        }
+    }
+
+    if out.is_empty() {
+        out.push(GameControllerInfo {
+            id: "none".into(),
+            name: "Ningún mando detectado. Conectá el USB o cerrá Steam si captura el DualShock."
+                .into(),
+            guid: "".into(),
+            kind: "generic".into(),
+        });
+    }
+
+    Ok(out)
+}
+
+fn list_via_gilrs() -> Result<Vec<GameControllerInfo>, String> {
+    let mut gilrs = Gilrs::new().map_err(|e| e.to_string())?;
+    // Drenar eventos para que conecte pads ya enchufados.
+    while let Some(ev) = gilrs.next_event() {
+        if matches!(
+            ev.event,
+            EventType::Connected | EventType::Disconnected
+        ) {
+            // seguir drenando
+        }
+    }
+
+    let mut out = Vec::new();
+    for (id, gamepad) in gilrs.gamepads() {
+        if !gamepad.is_connected() {
+            continue;
+        }
+        let name = gamepad.name().to_string();
+        if name.trim().is_empty() {
+            continue;
+        }
+        let guid = format!("{id:?}");
+        let kind = classify_kind(&name);
+        out.push(GameControllerInfo {
+            id: format!("gilrs-{guid}"),
+            name,
+            guid,
+            kind,
+        });
+    }
+    Ok(out)
+}
+
+/// Aplica layout (`auto`|`playstation`|`xbox`) a configs managed PCSX2 + RetroArch.
+#[tauri::command]
+pub fn apply_controller_layout_prefs(
+    app: AppHandle,
+    layout: String,
+) -> Result<(), String> {
+    let layout = match layout.trim().to_ascii_lowercase().as_str() {
+        "playstation" | "xbox" | "auto" => layout.trim().to_ascii_lowercase(),
+        _ => "auto".into(),
+    };
+    let app_data = app_data_dir(&app)?;
+    let pcsx2_ini = pcsx2_internal_data_root(&managed_data_root(&app_data, "pcsx2"))
+        .join("inis")
+        .join("PCSX2.ini");
+    let ra_cfg = managed_data_root(&app_data, "retroarch").join("retroarch.cfg");
+    let _ = apply_input_backend_policy("pcsx2", &pcsx2_ini, &layout);
+    let _ = apply_input_backend_policy("retroarch", &ra_cfg, &layout);
+    Ok(())
+}
+
+/// Escucha input ~timeout_ms. `true` si hubo botón/eje en el GUID (o cualquier mando).
+#[tauri::command]
+pub fn test_game_controller(
+    preferred_guid: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<bool, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(4000).clamp(500, 15_000));
+    let mut gilrs = Gilrs::new().map_err(|e| e.to_string())?;
+    let want = preferred_guid
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        while let Some(ev) = gilrs.next_event() {
+            let guid = format!("{:?}", ev.id);
+            let matches = want
+                .as_ref()
+                .map(|w| guid.contains(w) || w.contains(&guid) || format!("gilrs-{guid}").contains(w))
+                .unwrap_or(true);
+            if !matches {
+                continue;
+            }
+            match ev.event {
+                EventType::ButtonPressed(_, _)
+                | EventType::ButtonReleased(_, _)
+                | EventType::AxisChanged(_, _, _) => {
+                    return Ok(true);
+                }
+                _ => {}
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+    Ok(false)
+}
+
+fn list_via_xinput() -> Vec<GameControllerInfo> {
+    let mut out = Vec::new();
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Input::XboxController::{XInputGetState, XINPUT_STATE};
+        for i in 0u32..4 {
+            unsafe {
+                let mut state: XINPUT_STATE = std::mem::zeroed();
+                if XInputGetState(i, &mut state) == 0 {
+                    let name = format!("Controlador Xbox / XInput {i}");
+                    out.push(GameControllerInfo {
+                        id: format!("xinput-{i}"),
+                        name: name.clone(),
+                        guid: format!("xinput-{i}"),
+                        kind: "xbox".into(),
+                    });
+                }
+            }
+        }
+    }
+    out
+}

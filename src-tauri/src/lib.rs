@@ -12,6 +12,8 @@ mod secure_download;
 mod vendor_download;
 mod emulator_transport;
 mod emulator_full_config;
+mod controllers;
+mod blaze_prefs;
 
 use catalog_transfer::{
     catalog_games_dir, extract_catalog_zip, extract_zip_archive, http_download_file,
@@ -32,9 +34,16 @@ use emulator_data::{
 };
 use eden_config::{
     launch_eden_config_ui, launch_runtime_config_ui, list_audio_output_devices,
-    list_game_controllers, read_eden_audio_settings, read_runtime_audio_settings,
-    read_runtime_video_settings, reveal_path_in_explorer, write_eden_audio_settings,
-    write_runtime_audio_settings, write_runtime_video_settings,
+    read_eden_audio_settings, read_runtime_audio_settings, read_runtime_video_settings,
+    reveal_path_in_explorer, write_eden_audio_settings, write_runtime_audio_settings,
+    write_runtime_video_settings,
+};
+use controllers::{
+    apply_controller_layout_prefs, list_game_controllers, test_game_controller,
+};
+use blaze_prefs::{
+    default_emulation_prefs, load_emulation_prefs_cmd, save_controller_prefs_file,
+    save_emulation_prefs,
 };
 use runtime_install::{
     cancel_runtime_install, install_runtime, runtime_cores_status, runtime_manifest_ids,
@@ -114,6 +123,12 @@ pub fn run() {
             apply_managed_ra_credentials,
             list_audio_output_devices,
             list_game_controllers,
+            apply_controller_layout_prefs,
+            test_game_controller,
+            save_emulation_prefs,
+            load_emulation_prefs_cmd,
+            default_emulation_prefs,
+            save_controller_prefs_file,
             read_eden_audio_settings,
             write_eden_audio_settings,
             launch_eden_config_ui,

@@ -2,11 +2,6 @@
 import { computed, onMounted, ref, watch } from "vue";
 import type { Game } from "../types/game";
 import { runtimeKindForPlatform } from "../utils/platformRuntime";
-import {
-  languageLabel,
-  resolveAvailableLanguages,
-} from "../utils/gameLanguages";
-import { gameService } from "../services/game.service";
 import { launchConfigService } from "../services/launchConfig.service";
 import { gameContentService } from "../services/gameContent.service";
 import { runtimeRepository } from "../repositories/runtime.repository";
@@ -18,7 +13,6 @@ import {
   type GameControllerInfo,
 } from "../services/runtimeConfig.service";
 import { useCatalogDownloadStore } from "../stores/catalogDownload";
-import { useLibraryStore } from "../stores/library";
 import {
   isEdenRuntime,
   isPcsx2Runtime,
@@ -42,7 +36,6 @@ const saving = ref(false);
 const error = ref<string | null>(null);
 const okMsg = ref<string | null>(null);
 
-const preferredLanguage = ref<string>("en");
 const contentPath = ref<string | null>(null);
 const contentSize = ref<number | null>(null);
 const runtimeExe = ref<string | null>(null);
@@ -59,7 +52,6 @@ const resolutionScale = ref(1);
 const scaleOptions = ref<number[]>([1, 2, 3, 4]);
 
 const catalogDownloads = useCatalogDownloadStore();
-const library = useLibraryStore();
 
 const runtimeKind = computed(() =>
   runtimeKindForPlatform(props.game.platform),
@@ -71,12 +63,6 @@ const runtimeLabel = computed(() => {
   if (runtimeKind.value === "eden") return "Eden";
   return "emulador";
 });
-
-const availableLangs = computed(() =>
-  resolveAvailableLanguages(props.game.availableLanguages),
-);
-
-const languageLocked = computed(() => availableLangs.value.length <= 1);
 
 const tabs = computed(() => {
   const list: Array<{ id: TabId; label: string }> = [
@@ -175,12 +161,6 @@ async function loadRuntimeAudio(): Promise<void> {
 async function loadAll(): Promise<void> {
   error.value = null;
   okMsg.value = null;
-  const langs = availableLangs.value;
-  preferredLanguage.value =
-    props.game.preferredLanguage &&
-    langs.includes(props.game.preferredLanguage)
-      ? props.game.preferredLanguage
-      : langs[0]!;
   await loadFiles();
   await loadRuntimeAudio();
 }
@@ -198,26 +178,6 @@ watch(
 onMounted(() => {
   if (props.open) void loadAll();
 });
-
-async function saveLanguage(): Promise<void> {
-  if (languageLocked.value) return;
-  saving.value = true;
-  error.value = null;
-  try {
-    await gameService.setPreferredLanguage(
-      props.game.id,
-      preferredLanguage.value,
-    );
-    await library.loadLibrary();
-    okMsg.value = "Idioma guardado.";
-    emit("updated");
-  } catch (e) {
-    error.value =
-      e instanceof Error ? e.message : "No se pudo guardar el idioma.";
-  } finally {
-    saving.value = false;
-  }
-}
 
 async function saveAudio(): Promise<void> {
   const kind = runtimeKind.value;
@@ -348,35 +308,6 @@ function close(): void {
                 <dd>{{ game.releaseYear }}</dd>
               </div>
             </dl>
-
-            <label class="props-field">
-              <span>Idioma</span>
-              <select
-                v-model="preferredLanguage"
-                class="props-select"
-                :disabled="languageLocked || saving"
-              >
-                <option
-                  v-for="code in availableLangs"
-                  :key="code"
-                  :value="code"
-                >
-                  {{ languageLabel(code) }}
-                </option>
-              </select>
-              <span v-if="languageLocked" class="props-hint">
-                Este juego solo declara un idioma.
-              </span>
-            </label>
-            <button
-              v-if="!languageLocked"
-              type="button"
-              class="props-btn"
-              :disabled="saving"
-              @click="saveLanguage"
-            >
-              Guardar idioma
-            </button>
           </template>
 
           <template v-else-if="tab === 'files'">
@@ -498,11 +429,19 @@ function close(): void {
               <div class="props-controllers">
                 <p class="props-controllers__label">Mandos detectados</p>
                 <ul>
-                  <li v-for="c in controllers" :key="c.id">{{ c.name }}</li>
+                  <li v-for="c in controllers" :key="c.id">
+                    {{ c.name
+                    }}<span
+                      v-if="c.kind && c.kind !== 'generic' && c.id !== 'none'"
+                      class="props-controllers__kind"
+                    >
+                      ({{ c.kind === "playstation" ? "PlayStation" : "Xbox" }})
+                    </span>
+                  </li>
                 </ul>
                 <p class="props-hint">
-                  Conectá el mando antes de jugar. Audio y video se aplican al
-                  relanzar el juego.
+                  Conectá el mando por USB antes de jugar. Video/audio globales:
+                  Configuración → Emulación. Mandos: Configuración → Mandos.
                 </p>
               </div>
 
@@ -761,6 +700,12 @@ function close(): void {
   padding: 10px 12px;
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.25);
+}
+
+.props-controllers__kind {
+  margin-left: 6px;
+  color: #94a3b8;
+  font-size: 0.85em;
 }
 
 .props-controllers__label {
