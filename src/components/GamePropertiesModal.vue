@@ -12,6 +12,10 @@ import {
   type AudioDeviceInfo,
   type GameControllerInfo,
 } from "../services/runtimeConfig.service";
+import {
+  controllerPrefsService,
+  type ControllerLayout,
+} from "../services/controllerPrefs.service";
 import { useCatalogDownloadStore } from "../stores/catalogDownload";
 import {
   isEdenRuntime,
@@ -29,7 +33,7 @@ const emit = defineEmits<{
   updated: [];
 }>();
 
-type TabId = "general" | "files" | "control";
+type TabId = "general" | "files" | "control" | "pads";
 
 const tab = ref<TabId>("general");
 const saving = ref(false);
@@ -44,6 +48,10 @@ const engineOptions = ref<string[]>(["cubeb", "sdl2", "auto"]);
 
 const audioDevices = ref<AudioDeviceInfo[]>([]);
 const controllers = ref<GameControllerInfo[]>([]);
+const controllersBusy = ref(false);
+const controllerLayout = ref<ControllerLayout>("auto");
+const preferredGuid = ref("");
+const testPadBusy = ref(false);
 const outputEngine = ref("cubeb");
 const outputDevice = ref("auto");
 const volume = ref(100);
@@ -69,12 +77,17 @@ const tabs = computed(() => {
     { id: "general", label: "General" },
     { id: "files", label: "Archivos instalados" },
   ];
-  // Audio/video para cualquier runtime (PS2 / PS1 / Switch / etc.).
+  // Audio/video + mandos para cualquier runtime (PS2 / PS1 / Switch / etc.).
   if (runtimeKind.value) {
     list.push({ id: "control", label: "Audio y video" });
+    list.push({ id: "pads", label: "Mandos" });
   }
   return list;
 });
+
+const padChoices = computed(() =>
+  controllers.value.filter((c) => c.id !== "none"),
+);
 
 function scaleLabel(scale: number): string {
   if (scale <= 1) return "Nativa (1x)";
@@ -127,7 +140,7 @@ async function loadRuntimeAudio(): Promise<void> {
 
   try {
     audioDevices.value = await runtimeConfigService.listAudioDevices();
-    controllers.value = await runtimeConfigService.listControllers();
+    await loadControllerPrefs();
     const settings = await runtimeConfigService.readAudio({
       executablePath: runtimeExe.value,
       runtimeKind: kind,
@@ -156,6 +169,72 @@ async function loadRuntimeAudio(): Promise<void> {
         ? e.message
         : `No se pudo leer la config de ${runtimeLabel.value}.`;
   }
+}
+
+async function loadControllerPrefs(): Promise<void> {
+  controllersBusy.value = true;
+  try {
+    const prefs = await controllerPrefsService.get();
+    controllerLayout.value = prefs.layout;
+    preferredGuid.value = prefs.preferredDeviceGuid ?? "";
+    controllers.value = await runtimeConfigService.listControllers();
+  } catch {
+    controllers.value = [
+      {
+        id: "none",
+        name: "No se pudieron listar los mandos.",
+        guid: "",
+        kind: "generic",
+      },
+    ];
+  } finally {
+    controllersBusy.value = false;
+  }
+}
+
+async function saveControllerPrefs(): Promise<void> {
+  saving.value = true;
+  error.value = null;
+  okMsg.value = null;
+  try {
+    await controllerPrefsService.set({
+      layout: controllerLayout.value,
+      preferredDeviceGuid: preferredGuid.value.trim() || null,
+    });
+    okMsg.value = "Mandos guardados. Se aplican al jugar.";
+    emit("updated");
+  } catch (e) {
+    error.value =
+      e instanceof Error ? e.message : "No se pudieron guardar los mandos.";
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function testPreferredPad(): Promise<void> {
+  testPadBusy.value = true;
+  error.value = null;
+  okMsg.value = "Mové un stick o apretá un botón (4 s)…";
+  try {
+    const ok = await controllerPrefsService.testPad(
+      preferredGuid.value.trim() || null,
+    );
+    okMsg.value = ok
+      ? "Mando OK: Blaze recibió input."
+      : "Sin input. Reconectá el USB o cerrá Steam Input.";
+  } catch (e) {
+    error.value =
+      e instanceof Error ? e.message : "No se pudo probar el mando.";
+    okMsg.value = null;
+  } finally {
+    testPadBusy.value = false;
+  }
+}
+
+function controllerKindLabel(kind: string | undefined): string {
+  if (kind === "playstation") return "PlayStation";
+  if (kind === "xbox") return "Xbox";
+  return "";
 }
 
 async function loadAll(): Promise<void> {
@@ -426,24 +505,9 @@ function close(): void {
                 </select>
               </label>
 
-              <div class="props-controllers">
-                <p class="props-controllers__label">Mandos detectados</p>
-                <ul>
-                  <li v-for="c in controllers" :key="c.id">
-                    {{ c.name
-                    }}<span
-                      v-if="c.kind && c.kind !== 'generic' && c.id !== 'none'"
-                      class="props-controllers__kind"
-                    >
-                      ({{ c.kind === "playstation" ? "PlayStation" : "Xbox" }})
-                    </span>
-                  </li>
-                </ul>
-                <p class="props-hint">
-                  Conectá el mando por USB antes de jugar. Video/audio globales:
-                  Configuración → Emulación. Mandos: Configuración → Mandos.
-                </p>
-              </div>
+              <p class="props-hint">
+                Mandos: pestaña <strong>Mandos</strong> (layout y probar).
+              </p>
 
               <div class="props-actions">
                 <button
@@ -453,6 +517,90 @@ function close(): void {
                   @click="saveVideo"
                 >
                   Guardar video
+                </button>
+              </div>
+            </template>
+
+            <template v-else-if="tab === 'pads'">
+              <p class="props-hint props-hint--block">
+                Elegí layout y mando según lo que tengas conectado. Se aplica al
+                jugar (PCSX2 / RetroArch / Eden).
+              </p>
+
+              <div class="props-controllers">
+                <p class="props-controllers__label">Detectados</p>
+                <ul>
+                  <li v-for="c in controllers" :key="c.id">
+                    {{ c.name
+                    }}<span
+                      v-if="controllerKindLabel(c.kind)"
+                      class="props-controllers__kind"
+                    >
+                      ({{ controllerKindLabel(c.kind) }})
+                    </span>
+                  </li>
+                </ul>
+                <button
+                  type="button"
+                  class="props-link"
+                  :disabled="controllersBusy || saving"
+                  @click="loadControllerPrefs"
+                >
+                  {{ controllersBusy ? "Buscando…" : "Actualizar lista" }}
+                </button>
+                <p class="props-hint">
+                  Si no aparece el PS4/PS5, cerrá Steam (Steam Input) y reconectá
+                  el USB.
+                </p>
+              </div>
+
+              <label class="props-field">
+                <span>Layout preferido</span>
+                <select
+                  v-model="controllerLayout"
+                  class="props-select"
+                  :disabled="saving"
+                >
+                  <option value="auto">Automático</option>
+                  <option value="playstation">PlayStation</option>
+                  <option value="xbox">Xbox</option>
+                </select>
+              </label>
+
+              <label class="props-field">
+                <span>Mando principal</span>
+                <select
+                  v-model="preferredGuid"
+                  class="props-select"
+                  :disabled="saving"
+                >
+                  <option value="">Primero detectado</option>
+                  <option
+                    v-for="c in padChoices"
+                    :key="c.id"
+                    :value="c.guid || c.id"
+                  >
+                    {{ c.name }}
+                  </option>
+                </select>
+              </label>
+
+              <div class="props-actions props-actions--row">
+                <button
+                  type="button"
+                  class="props-btn props-btn--sky"
+                  :disabled="saving"
+                  @click="saveControllerPrefs"
+                >
+                  Guardar mandos
+                </button>
+                <button
+                  type="button"
+                  class="props-btn"
+                  :disabled="testPadBusy || saving"
+                  @click="testPreferredPad"
+                >
+                  {{ testPadBusy ? "Escuchando…" : "Probar mando" }}
                 </button>
               </div>
             </template>
@@ -721,6 +869,35 @@ function close(): void {
   padding-left: 18px;
   color: #c7d5e0;
   font-size: 13px;
+}
+
+.props-hint--block {
+  margin-bottom: 12px;
+}
+
+.props-link {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #66c0f4;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.props-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.props-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.props-actions--row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 @media (max-width: 640px) {

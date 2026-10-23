@@ -454,8 +454,8 @@ function entryDot(statusCode: string): string {
     <section class="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-6">
       <h2 class="mb-1 text-lg font-medium text-white">Mandos</h2>
       <p class="mb-4 text-sm text-slate-400">
-        Detección HID + Xbox (DualShock por USB). PCSX2/RetroArch usan SDL al
-        lanzar. Eden: conectá y jugá (sin abrir el emulador).
+        Misma config que ven los jugadores en Propiedades → Mandos.
+        Detección HID + Xbox; SDL al lanzar. Eden: conectá y jugá.
       </p>
       <p v-if="controllerErr" class="mb-3 text-sm text-rose-300">{{ controllerErr }}</p>
       <p v-if="controllerMsg" class="mb-3 text-sm text-emerald-300">{{ controllerMsg }}</p>
