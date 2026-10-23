@@ -28,6 +28,7 @@ import {
 import {
   emulationPrefsService,
   type EmulationKindPrefs,
+  type EmulationPrefsMap,
   type EmulationRuntimeKind,
 } from "../services/emulationPrefs.service";
 import {
@@ -66,9 +67,7 @@ const emuForm = ref<EmulationKindPrefs>({
   volume: 80,
 });
 const emuCaps = ref<EmulatorConfigCapabilities | null>(null);
-const emuAll = ref<Record<EmulationRuntimeKind, EmulationKindPrefs> | null>(
-  null,
-);
+const emuAll = ref<EmulationPrefsMap | null>(null);
 const emuSaveMsg = ref<string | null>(null);
 const emuSaveErr = ref<string | null>(null);
 const emuSaveBusy = ref(false);
@@ -188,7 +187,9 @@ async function selectEmuKind(kind: EmulationRuntimeKind) {
   if (!emuAll.value) {
     emuAll.value = await emulationPrefsService.get();
   }
-  emuForm.value = { ...emuAll.value[kind] };
+  const map = emuAll.value;
+  if (!map) return;
+  emuForm.value = { ...map[kind] };
 }
 
 async function saveEmulationPrefs() {

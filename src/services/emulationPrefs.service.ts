@@ -21,6 +21,9 @@ export type EmulationPrefsFile = {
   eden?: EmulationKindPrefs | null;
 };
 
+/** Prefs normalizadas: siempre hay valor para cada runtime (sin null). */
+export type EmulationPrefsMap = Record<EmulationRuntimeKind, EmulationKindPrefs>;
+
 function fromConfig(cfg: EmulatorConfig): EmulationKindPrefs {
   return {
     fullscreen: cfg.fullscreen,
@@ -65,8 +68,34 @@ export const emulationPrefsService = {
     }
   },
 
-  async get(): Promise<Required<EmulationPrefsFile>> {
+  async get(): Promise<EmulationPrefsMap> {
     const defaults = await this.defaults();
+    const fallback: EmulationPrefsMap = {
+      pcsx2: normalizeKind(defaults.pcsx2, {
+        fullscreen: true,
+        resolutionScale: 2,
+        renderer: "d3d11",
+        vsync: true,
+        audioEngine: "xaudio2",
+        volume: 80,
+      }),
+      retroarch: normalizeKind(defaults.retroarch, {
+        fullscreen: true,
+        resolutionScale: 2,
+        renderer: "d3d11",
+        vsync: true,
+        audioEngine: "wasapi",
+        volume: 80,
+      }),
+      eden: normalizeKind(defaults.eden, {
+        fullscreen: true,
+        resolutionScale: 2,
+        renderer: "vulkan",
+        vsync: true,
+        audioEngine: "auto",
+        volume: 80,
+      }),
+    };
     let stored: EmulationPrefsFile = {};
     try {
       stored = await invoke<EmulationPrefsFile>("load_emulation_prefs_cmd");
@@ -74,13 +103,13 @@ export const emulationPrefsService = {
       stored = {};
     }
     return {
-      pcsx2: normalizeKind(stored.pcsx2, defaults.pcsx2!),
-      retroarch: normalizeKind(stored.retroarch, defaults.retroarch!),
-      eden: normalizeKind(stored.eden, defaults.eden!),
+      pcsx2: normalizeKind(stored.pcsx2, fallback.pcsx2),
+      retroarch: normalizeKind(stored.retroarch, fallback.retroarch),
+      eden: normalizeKind(stored.eden, fallback.eden),
     };
   },
 
-  async set(prefs: Required<EmulationPrefsFile>): Promise<void> {
+  async set(prefs: EmulationPrefsMap): Promise<void> {
     await invoke("save_emulation_prefs", { prefs });
   },
 };
