@@ -520,90 +520,90 @@ function close(): void {
                 </button>
               </div>
             </template>
+          </template>
 
-            <template v-else-if="tab === 'pads'">
-              <p class="props-hint props-hint--block">
-                Elegí layout y mando según lo que tengas conectado. Se aplica al
-                jugar (PCSX2 / RetroArch / Eden).
-              </p>
+          <template v-else-if="tab === 'pads'">
+            <p class="props-hint props-hint--block">
+              Elegí layout y mando según lo que tengas conectado. Se aplica al
+              jugar (PCSX2 / RetroArch / Eden).
+            </p>
 
-              <div class="props-controllers">
-                <p class="props-controllers__label">Detectados</p>
-                <ul>
-                  <li v-for="c in controllers" :key="c.id">
-                    {{ c.name
-                    }}<span
-                      v-if="controllerKindLabel(c.kind)"
-                      class="props-controllers__kind"
-                    >
-                      ({{ controllerKindLabel(c.kind) }})
-                    </span>
-                  </li>
-                </ul>
-                <button
-                  type="button"
-                  class="props-link"
-                  :disabled="controllersBusy || saving"
-                  @click="loadControllerPrefs"
-                >
-                  {{ controllersBusy ? "Buscando…" : "Actualizar lista" }}
-                </button>
-                <p class="props-hint">
-                  Si no aparece el PS4/PS5, cerrá Steam (Steam Input) y reconectá
-                  el USB.
-                </p>
-              </div>
-
-              <label class="props-field">
-                <span>Layout preferido</span>
-                <select
-                  v-model="controllerLayout"
-                  class="props-select"
-                  :disabled="saving"
-                >
-                  <option value="auto">Automático</option>
-                  <option value="playstation">PlayStation</option>
-                  <option value="xbox">Xbox</option>
-                </select>
-              </label>
-
-              <label class="props-field">
-                <span>Mando principal</span>
-                <select
-                  v-model="preferredGuid"
-                  class="props-select"
-                  :disabled="saving"
-                >
-                  <option value="">Primero detectado</option>
-                  <option
-                    v-for="c in padChoices"
-                    :key="c.id"
-                    :value="c.guid || c.id"
+            <div class="props-controllers">
+              <p class="props-controllers__label">Detectados</p>
+              <ul>
+                <li v-for="c in controllers" :key="c.id">
+                  {{ c.name
+                  }}<span
+                    v-if="controllerKindLabel(c.kind)"
+                    class="props-controllers__kind"
                   >
-                    {{ c.name }}
-                  </option>
-                </select>
-              </label>
+                    ({{ controllerKindLabel(c.kind) }})
+                  </span>
+                </li>
+              </ul>
+              <button
+                type="button"
+                class="props-link"
+                :disabled="controllersBusy || saving"
+                @click="loadControllerPrefs"
+              >
+                {{ controllersBusy ? "Buscando…" : "Actualizar lista" }}
+              </button>
+              <p class="props-hint">
+                Si no aparece el PS4/PS5, cerrá Steam (Steam Input) y reconectá
+                el USB.
+              </p>
+            </div>
 
-              <div class="props-actions props-actions--row">
-                <button
-                  type="button"
-                  class="props-btn props-btn--sky"
-                  :disabled="saving"
-                  @click="saveControllerPrefs"
+            <label class="props-field">
+              <span>Layout preferido</span>
+              <select
+                v-model="controllerLayout"
+                class="props-select"
+                :disabled="saving"
+              >
+                <option value="auto">Automático</option>
+                <option value="playstation">PlayStation</option>
+                <option value="xbox">Xbox</option>
+              </select>
+            </label>
+
+            <label class="props-field">
+              <span>Mando principal</span>
+              <select
+                v-model="preferredGuid"
+                class="props-select"
+                :disabled="saving"
+              >
+                <option value="">Primero detectado</option>
+                <option
+                  v-for="c in padChoices"
+                  :key="c.id"
+                  :value="c.guid || c.id"
                 >
-                  Guardar mandos
-                </button>
-                <button
-                  type="button"
-                  class="props-btn"
-                  :disabled="testPadBusy || saving"
-                  @click="testPreferredPad"
-                >
-                  {{ testPadBusy ? "Escuchando…" : "Probar mando" }}
-                </button>
-              </div>
-            </template>
+                  {{ c.name }}
+                </option>
+              </select>
+            </label>
+
+            <div class="props-actions props-actions--row">
+              <button
+                type="button"
+                class="props-btn props-btn--sky"
+                :disabled="saving"
+                @click="saveControllerPrefs"
+              >
+                Guardar mandos
+              </button>
+              <button
+                type="button"
+                class="props-btn"
+                :disabled="testPadBusy || saving"
+                @click="testPreferredPad"
+              >
+                {{ testPadBusy ? "Escuchando…" : "Probar mando" }}
+              </button>
+            </div>
           </template>
         </div>
       </div>
