@@ -639,8 +639,13 @@ pub fn build_managed_launch_arguments(
             let mut args = vec![
                 "-datapath".to_string(),
                 datapath.to_string_lossy().to_string(),
-                "-fastboot".to_string(),
             ];
+            // Fast boot salta la BIOS → Multi5 PAL (GoW 1, etc.) quedan en inglés.
+            // Full boot cuando el idioma forzado no es inglés.
+            let lang = force_lang.trim().to_ascii_lowercase();
+            if lang == "en" || lang == "english" {
+                args.push("-fastboot".to_string());
+            }
             if start_fullscreen {
                 args.push("-fullscreen".to_string());
             }
