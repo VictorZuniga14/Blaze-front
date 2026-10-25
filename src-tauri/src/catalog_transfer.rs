@@ -5,7 +5,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
-use crate::secure_download::{ensure_path_within, sha256_file, SecureDownloadError};
+use crate::secure_download::ensure_path_within;
 
 /// Manifest dentro del zip Switch del catálogo (base + update/DLC).
 pub const SWITCH_BUNDLE_MANIFEST: &str = "blaze-switch.json";

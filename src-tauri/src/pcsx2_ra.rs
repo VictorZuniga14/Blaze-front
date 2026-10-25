@@ -1,7 +1,5 @@
 //! Compatibilidad Fase 4B-1: API PCSX2 reutiliza el inspector unificado.
-use crate::ra_status::{
-    inspect_path, open_emulator_for_configuration, EmulatorRaStatus,
-};
+use crate::ra_status::{inspect_path, EmulatorRaStatus};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]

@@ -602,7 +602,7 @@ pub fn build_managed_launch_arguments(
     base_arguments: &[String],
     content_path: &str,
     start_fullscreen: bool,
-    /// Código de idioma a forzar en BIOS PS2 (`es`, `en`, …).
+    // Código de idioma a forzar en BIOS PS2 (`es`, `en`, …).
     force_lang: &str,
 ) -> Result<Vec<String>, LaunchPrepError> {
     // Eden: keys/firmware viven en emulator-data/eden aunque el exe sea manual (Escritorio).
@@ -688,9 +688,9 @@ pub fn prepare_runtime_launch(
     content_path: String,
     base_arguments: Vec<String>,
     start_fullscreen: Option<bool>,
-    /// Idioma preferido del juego (`es`, `en`, …).
+    // Idioma preferido del juego (`es`, `en`, …).
     preferred_language: Option<String>,
-    /// Idiomas que declara el juego; vacío → Blaze asume español.
+    // Idiomas que declara el juego; vacío → Blaze asume español.
     available_languages: Option<Vec<String>>,
 ) -> RuntimeLaunchPlan {
     let available = available_languages.unwrap_or_default();
