@@ -53,6 +53,32 @@ pub fn inspect_pcsx2_retroachievements(executable_path: String) -> Result<Pcsx2R
 }
 
 #[tauri::command]
-pub fn open_pcsx2_for_configuration(executable_path: String) -> Result<(), String> {
-    open_emulator_for_configuration(executable_path)
+pub fn open_pcsx2_for_configuration(
+    app: tauri::AppHandle,
+    executable_path: String,
+) -> Result<(), String> {
+    use crate::emulator_data::{
+        app_data_dir, managed_data_root, pcsx2_bios_directory, pcsx2_internal_data_root,
+    };
+    use crate::pcsx2_bios_lang::ensure_pcsx2_bios_language;
+    use crate::ra_status::{
+        open_emulator_for_configuration, open_emulator_for_configuration_with_args,
+    };
+
+    let app_data = app_data_dir(&app)?;
+    let datapath = managed_data_root(&app_data, "pcsx2");
+    let bios_dir = pcsx2_bios_directory(&pcsx2_internal_data_root(&datapath));
+    let _ = ensure_pcsx2_bios_language(&bios_dir, "es");
+
+    if datapath.is_dir() {
+        open_emulator_for_configuration_with_args(
+            executable_path,
+            &[
+                "-datapath".to_string(),
+                datapath.to_string_lossy().to_string(),
+            ],
+        )
+    } else {
+        open_emulator_for_configuration(executable_path)
+    }
 }

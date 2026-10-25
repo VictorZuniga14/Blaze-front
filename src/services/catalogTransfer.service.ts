@@ -58,8 +58,13 @@ export async function listSwitchExtras(basePath: string): Promise<string[]> {
 export async function extractZipArchive(
   zipPath: string,
   destDir: string,
+  transferId?: string,
 ): Promise<string> {
-  return invoke<string>("extract_zip_archive", { zipPath, destDir });
+  return invoke<string>("extract_zip_archive", {
+    zipPath,
+    destDir,
+    transferId: transferId ?? null,
+  });
 }
 
 export type CatalogZipExtract = {
@@ -72,8 +77,13 @@ export type CatalogZipExtract = {
 export async function extractCatalogZip(
   zipPath: string,
   destDir: string,
+  transferId?: string,
 ): Promise<CatalogZipExtract> {
-  return invoke<CatalogZipExtract>("extract_catalog_zip", { zipPath, destDir });
+  return invoke<CatalogZipExtract>("extract_catalog_zip", {
+    zipPath,
+    destDir,
+    transferId: transferId ?? null,
+  });
 }
 
 /** Instala NSP update/DLC en la User NAND de Eden. */

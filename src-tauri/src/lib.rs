@@ -14,6 +14,8 @@ mod emulator_transport;
 mod emulator_full_config;
 mod controllers;
 mod blaze_prefs;
+mod eden_input;
+mod pcsx2_bios_lang;
 
 use catalog_transfer::{
     catalog_games_dir, extract_catalog_zip, extract_zip_archive, http_download_file,

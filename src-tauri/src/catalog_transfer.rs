@@ -270,18 +270,24 @@ pub async fn http_download_file(
         .map_err(|e| format!("No se pudo crear archivo: {e}"))?;
     let mut stream = response.bytes_stream();
     let mut done = 0u64;
+    let mut last_emit = 0u64;
+    let total = bytes_total;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Error leyendo descarga: {e}"))?;
         file.write_all(&chunk)
             .await
             .map_err(|e| format!("Error escribiendo archivo: {e}"))?;
         done += chunk.len() as u64;
-        emit_progress(&app, &transfer_id, "download", done, bytes_total.max(done));
+        let report_total = total.max(done);
+        if done - last_emit >= PROGRESS_EMIT_EVERY || done >= report_total {
+            last_emit = done;
+            emit_progress(&app, &transfer_id, "download", done, report_total);
+        }
     }
     file.flush()
         .await
         .map_err(|e| format!("Error al cerrar archivo: {e}"))?;
-    emit_progress(&app, &transfer_id, "download", done, bytes_total.max(done));
+    emit_progress(&app, &transfer_id, "download", done, total.max(done));
     Ok(())
 }
 
@@ -595,12 +601,37 @@ fn pack_switch_bundle_blocking(
     Ok(dest_zip.to_string())
 }
 
-fn extract_zip_flat(zip_path: &Path, dest: &Path) -> Result<Vec<PathBuf>, String> {
+fn extract_zip_flat(
+    app: Option<&AppHandle>,
+    transfer_id: Option<&str>,
+    zip_path: &Path,
+    dest: &Path,
+) -> Result<Vec<PathBuf>, String> {
     let file = File::open(zip_path).map_err(|e| format!("No se pudo abrir el zip: {e}"))?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("Zip inválido: {e}"))?;
 
+    let mut bytes_total: u64 = 0;
+    for i in 0..archive.len() {
+        let entry = archive
+            .by_index(i)
+            .map_err(|e| format!("Error leyendo entrada del zip: {e}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        bytes_total = bytes_total.saturating_add(entry.size());
+    }
+    if bytes_total == 0 {
+        bytes_total = 1;
+    }
+
     let mut extracted: Vec<PathBuf> = Vec::new();
+    let mut bytes_done: u64 = 0;
+    let mut last_emit: u64 = 0;
+    if let (Some(app), Some(tid)) = (app, transfer_id) {
+        emit_progress(app, tid, "extract", 0, bytes_total);
+    }
+
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -619,35 +650,47 @@ fn extract_zip_flat(zip_path: &Path, dest: &Path) -> Result<Vec<PathBuf>, String
         }
         let mut out = File::create(&out_path)
             .map_err(|e| format!("No se pudo crear {}: {e}", out_path.display()))?;
-        std::io::copy(&mut entry, &mut out)
-            .map_err(|e| format!("Error extrayendo {}: {e}", out_path.display()))?;
+        let mut buf = [0u8; 1024 * 1024];
+        loop {
+            let n = entry
+                .read(&mut buf)
+                .map_err(|e| format!("Error extrayendo {}: {e}", out_path.display()))?;
+            if n == 0 {
+                break;
+            }
+            out.write_all(&buf[..n])
+                .map_err(|e| format!("Error escribiendo {}: {e}", out_path.display()))?;
+            bytes_done = bytes_done.saturating_add(n as u64);
+            if let (Some(app), Some(tid)) = (app, transfer_id) {
+                if bytes_done - last_emit >= PROGRESS_EMIT_EVERY || bytes_done >= bytes_total {
+                    last_emit = bytes_done;
+                    emit_progress(
+                        app,
+                        tid,
+                        "extract",
+                        bytes_done.min(bytes_total),
+                        bytes_total,
+                    );
+                }
+            }
+        }
         extracted.push(out_path);
     }
     if extracted.is_empty() {
         return Err("El zip no contenía archivos.".into());
     }
+    if let (Some(app), Some(tid)) = (app, transfer_id) {
+        emit_progress(app, tid, "extract", bytes_total, bytes_total);
+    }
     Ok(extracted)
 }
 
-/// Descomprime un zip de catálogo. Devuelve la ruta al .cue / base Switch / primer archivo.
-#[tauri::command]
-pub fn extract_zip_archive(app: AppHandle, zip_path: String, dest_dir: String) -> Result<String, String> {
-    let catalog_games = catalog_games_dir(app)?;
-    let catalog_games_path = PathBuf::from(&catalog_games);
-    
-    // Validar que ambas rutas estén dentro de catalog-games
-    ensure_path_within(Path::new(&zip_path), &catalog_games_path)
-        .map_err(|_| "Ruta del zip no permitida".to_string())?;
-    ensure_path_within(Path::new(&dest_dir), &catalog_games_path)
-        .map_err(|_| "Ruta de destino no permitida".to_string())?;
-    
-    let detail = extract_catalog_zip(zip_path, dest_dir)?;
-    Ok(detail.primary_path)
-}
-
-/// Como `extract_zip_archive`, pero también lista update/DLC del manifest Switch.
-#[tauri::command]
-pub fn extract_catalog_zip(zip_path: String, dest_dir: String) -> Result<SwitchBundleExtract, String> {
+fn extract_catalog_zip_blocking(
+    app: &AppHandle,
+    zip_path: String,
+    dest_dir: String,
+    transfer_id: Option<&str>,
+) -> Result<SwitchBundleExtract, String> {
     let zip_path = PathBuf::from(&zip_path);
     if !zip_path.is_file() {
         return Err("El archivo zip no existe.".into());
@@ -656,7 +699,7 @@ pub fn extract_catalog_zip(zip_path: String, dest_dir: String) -> Result<SwitchB
     std::fs::create_dir_all(&dest)
         .map_err(|e| format!("No se pudo crear carpeta destino: {e}"))?;
 
-    let extracted = extract_zip_flat(&zip_path, &dest)?;
+    let extracted = extract_zip_flat(Some(app), transfer_id, &zip_path, &dest)?;
 
     let manifest_path = dest.join(SWITCH_BUNDLE_MANIFEST);
     if manifest_path.is_file() {
@@ -697,6 +740,56 @@ pub fn extract_catalog_zip(zip_path: String, dest_dir: String) -> Result<SwitchB
         install_paths: vec![],
         has_manifest: false,
     })
+}
+
+/// Descomprime un zip de catálogo. Devuelve la ruta al .cue / base Switch / primer archivo.
+/// Async + spawn_blocking: un ZIP multi-GB no debe congelar la UI.
+#[tauri::command]
+pub async fn extract_zip_archive(
+    app: AppHandle,
+    zip_path: String,
+    dest_dir: String,
+    transfer_id: Option<String>,
+) -> Result<String, String> {
+    let catalog_games = catalog_games_dir(app.clone())?;
+    let catalog_games_path = PathBuf::from(&catalog_games);
+
+    ensure_path_within(Path::new(&zip_path), &catalog_games_path)
+        .map_err(|_| "Ruta del zip no permitida".to_string())?;
+    ensure_path_within(Path::new(&dest_dir), &catalog_games_path)
+        .map_err(|_| "Ruta de destino no permitida".to_string())?;
+
+    let detail = extract_catalog_zip(app, zip_path, dest_dir, transfer_id).await?;
+    Ok(detail.primary_path)
+}
+
+/// Como `extract_zip_archive`, pero también lista update/DLC del manifest Switch.
+/// Async: evita "Not Responding" con paquetes Switch grandes.
+#[tauri::command]
+pub async fn extract_catalog_zip(
+    app: AppHandle,
+    zip_path: String,
+    dest_dir: String,
+    transfer_id: Option<String>,
+) -> Result<SwitchBundleExtract, String> {
+    tokio::task::spawn_blocking(move || {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            extract_catalog_zip_blocking(
+                &app,
+                zip_path,
+                dest_dir,
+                transfer_id.as_deref(),
+            )
+        })) {
+            Ok(result) => result,
+            Err(_) => Err(
+                "Falló la extracción (archivo demasiado grande o zip inválido). Probá de nuevo."
+                    .into(),
+            ),
+        }
+    })
+    .await
+    .map_err(|e| format!("Extracción cancelada: {e}"))?
 }
 
 #[tauri::command]

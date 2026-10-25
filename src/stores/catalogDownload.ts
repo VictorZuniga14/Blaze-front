@@ -49,8 +49,10 @@ function progressToHud(p: CatalogInstallProgress): {
     status = "downloading";
     hudTitle = "DESCARGANDO";
   } else if (p.phase === "installing") {
-    status = "installing";
-    hudTitle = "INSTALANDO";
+    // Post-bajada del catálogo (unzip/DLC) se reporta como "downloading" unificado.
+    // Si algo aún emite installing, se muestra igual como descarga continua.
+    status = "downloading";
+    hudTitle = "DESCARGANDO";
   } else {
     status = "downloading";
     hudTitle = "PREPARANDO";

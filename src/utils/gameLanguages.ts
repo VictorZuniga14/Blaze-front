@@ -26,6 +26,35 @@ export function resolveAvailableLanguages(
   return [...new Set(cleaned)];
 }
 
+function isSpanishCode(code: string): boolean {
+  const c = code.trim().toLowerCase();
+  return c === "es" || c.startsWith("es-");
+}
+
+/**
+ * Preferí español si el juego lo declara o no declara idiomas.
+ * Si solo tiene otros (ej. solo `en`), respeta el primero.
+ */
+export function defaultPreferredLanguage(
+  codes: string[] | null | undefined,
+): string {
+  const cleaned = (codes ?? []).map((c) => c.trim()).filter(Boolean);
+  if (cleaned.length === 0) return "es";
+  const es = cleaned.find(isSpanishCode);
+  return es ?? cleaned[0]!;
+}
+
+/** True si debemos forzar español (soporta ES o no hay lista de idiomas). */
+export function shouldForceSpanish(
+  codes: string[] | null | undefined,
+  preferred?: string | null,
+): boolean {
+  if (preferred && isSpanishCode(preferred)) return true;
+  const cleaned = (codes ?? []).map((c) => c.trim()).filter(Boolean);
+  if (cleaned.length === 0) return true;
+  return cleaned.some(isSpanishCode);
+}
+
 export function languageLabel(code: string): string {
   return LABELS[code] ?? LABELS[code.toLowerCase()] ?? code;
 }

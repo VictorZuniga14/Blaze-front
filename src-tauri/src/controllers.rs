@@ -20,6 +20,25 @@ pub struct GameControllerInfo {
     pub kind: String,
 }
 
+/// Lista mandos reales (sin el ítem informativo “ninguno”).
+pub fn list_game_controllers_raw() -> Result<Vec<GameControllerInfo>, String> {
+    let mut out = match list_via_gilrs() {
+        Ok(list) => list,
+        Err(_) => list_via_xinput(),
+    };
+    if out.is_empty() {
+        for pad in list_via_xinput() {
+            if !out.iter().any(|p| p.id == pad.id || p.name == pad.name) {
+                out.push(pad);
+            }
+        }
+    }
+    Ok(out
+        .into_iter()
+        .filter(|p| p.id != "none" && !p.guid.is_empty())
+        .collect())
+}
+
 fn classify_kind(name: &str) -> String {
     let n = name.to_ascii_lowercase();
     if n.contains("dualshock")
@@ -139,6 +158,10 @@ pub fn apply_controller_layout_prefs(
     let ra_cfg = managed_data_root(&app_data, "retroarch").join("retroarch.cfg");
     let _ = apply_input_backend_policy("pcsx2", &pcsx2_ini, &layout);
     let _ = apply_input_backend_policy("retroarch", &ra_cfg, &layout);
+    // preferred GUID ya está en blaze-preferred-pad.json / se aplica al Guardar mandos.
+    for eden_ini in crate::eden_input::find_eden_qt_config_paths(&app_data) {
+        let _ = crate::eden_input::apply_eden_input_backends(&eden_ini, &layout, None);
+    }
     Ok(())
 }
 

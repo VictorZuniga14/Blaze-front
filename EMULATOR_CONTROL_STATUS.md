@@ -179,7 +179,7 @@
 **No soportado:**
 - ❌ Audio engine: Usa audio del sistema
 - ❌ Hotkeys: No configurables en v0.2.1
-- ❌ Controller profiles: No configurables desde Blaze (usar UI nativa Eden; detección HID sí en Configuración → Mandos)
+- ✅ Controller profiles: Blaze Mandos (layout + mando principal) se aplica a Eden `player_0` en qt-config.ini al guardar / al jugar
 - ❌ IPC: Sin API de control en v0.2.1
 - ❌ Pause: Solo via kill/resume proceso (no implementado)
 - ❌ Save states: No disponible via IPC
@@ -257,6 +257,11 @@ Valores por defecto sensatos:
 - Fullscreen: Sí
 - Resolution: 2x (balance calidad/rendimiento)
 - Audio: 80% volumen
-- Idioma: Español
+- Idioma UI: Español (Eden / RetroArch)
+- Idioma de consola: se fuerza **español** al jugar si el juego declara ES (o no declara idiomas)
+  - PCSX2: `.nvm` BIOS
+  - Eden: `System.language_index=5` (español)
+  - RetroArch: `user_language` español
+- Si el juego solo tiene p. ej. inglés y no ES → no se fuerza ES
 - VSync: Sí (menos tearing)
 - Renderer: D3D11 (PCSX2/RA), Vulkan (Eden)

@@ -7,6 +7,7 @@ import { isEdenRuntime, resolveRuntimeKind } from "./ra/adapterKind";
 import { resolveRetroArchLaunchArguments } from "../utils/platformRuntime";
 import { runtimeConfigService } from "./runtimeConfig.service";
 import { controllerPrefsService } from "./controllerPrefs.service";
+import { defaultPreferredLanguage } from "../utils/gameLanguages";
 import type {
   ActiveProcess,
   LastProcessResult,
@@ -117,6 +118,9 @@ export const launchService = {
         // best-effort
       }
 
+      const preferredLanguage =
+        game?.preferredLanguage?.trim() ||
+        defaultPreferredLanguage(game?.availableLanguages);
       const launchPlan = await invoke<{
         arguments: string[];
         error: string | null;
@@ -128,6 +132,8 @@ export const launchService = {
         contentPath,
         baseArguments: resolvedArgs,
         startFullscreen,
+        preferredLanguage,
+        availableLanguages: game?.availableLanguages ?? [],
       });
       if (launchPlan.error) {
         throw new Error(launchPlan.error);

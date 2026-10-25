@@ -602,6 +602,8 @@ pub fn build_managed_launch_arguments(
     base_arguments: &[String],
     content_path: &str,
     start_fullscreen: bool,
+    /// Código de idioma a forzar en BIOS PS2 (`es`, `en`, …).
+    force_lang: &str,
 ) -> Result<Vec<String>, LaunchPrepError> {
     // Eden: keys/firmware viven en emulator-data/eden aunque el exe sea manual (Escritorio).
     if emulator_kind == "eden" {
@@ -630,6 +632,9 @@ pub fn build_managed_launch_arguments(
                 .as_ref()
                 .expect("managed pcsx2 internal data root");
             ensure_pcsx2_bios_for_launch(internal)?;
+            // Idioma OSD: español si el juego lo soporta / no declara idiomas.
+            let bios_dir = pcsx2_bios_directory(internal);
+            let _ = crate::pcsx2_bios_lang::ensure_pcsx2_bios_language(bios_dir.as_path(), force_lang);
 
             let mut args = vec![
                 "-datapath".to_string(),
@@ -683,7 +688,16 @@ pub fn prepare_runtime_launch(
     content_path: String,
     base_arguments: Vec<String>,
     start_fullscreen: Option<bool>,
+    /// Idioma preferido del juego (`es`, `en`, …).
+    preferred_language: Option<String>,
+    /// Idiomas que declara el juego; vacío → Blaze asume español.
+    available_languages: Option<Vec<String>>,
 ) -> RuntimeLaunchPlan {
+    let available = available_languages.unwrap_or_default();
+    let force_lang = crate::pcsx2_bios_lang::resolve_force_lang_code(
+        preferred_language.as_deref(),
+        &available,
+    );
     let exe = PathBuf::from(&executable_path);
     let kind = crate::ra_status::detect_kind(&exe);
     if kind == "unknown" {
@@ -753,6 +767,7 @@ pub fn prepare_runtime_launch(
             &exe,
             None,
             None,
+            Some(force_lang.as_str()),
         );
     }
 
@@ -785,6 +800,7 @@ pub fn prepare_runtime_launch(
             &exe,
             paths.pcsx2_data_root.as_deref(),
             paths.retroarch_cfg.as_deref(),
+            Some(force_lang.as_str()),
         );
     }
 
@@ -795,6 +811,7 @@ pub fn prepare_runtime_launch(
         &base_arguments,
         &content_path,
         start_fullscreen.unwrap_or(true),
+        &force_lang,
     ) {
         Ok(arguments) => RuntimeLaunchPlan {
             arguments,
@@ -1712,6 +1729,7 @@ mod tests {
             &[],
             r"C:\games\mk8.nsp",
             true,
+            "es",
         )
         .unwrap();
         assert_eq!(args, vec!["-f".to_string(), "-g".to_string(), r"C:\games\mk8.nsp".to_string()]);

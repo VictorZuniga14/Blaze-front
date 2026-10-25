@@ -5,7 +5,6 @@ import {
   catalogGamesDir,
   downloadFile,
   extractCatalogZip,
-  formatBytes,
   installEdenTitleNsps,
   joinPath,
   listenTransferProgress,
@@ -24,7 +23,10 @@ import {
   resolveRetroArchLaunchArguments,
   runtimeKindForPlatform,
 } from "../utils/platformRuntime";
-import { resolveAvailableLanguages } from "../utils/gameLanguages";
+import {
+  defaultPreferredLanguage,
+  resolveAvailableLanguages,
+} from "../utils/gameLanguages";
 
 export type CatalogInstallProgress = {
   phase:
@@ -60,6 +62,46 @@ async function pathExists(path: string): Promise<boolean> {
   return invoke<boolean>("path_check", { path, kind: "file" });
 }
 
+/** Fracción del total del paquete reservada a la bajada HTTP cuando hay post-trabajo (zip). */
+const PACKAGE_DOWNLOAD_SHARE = 0.55;
+/** Dentro del tramo post-bajada, cuánto ocupa el unzip antes del install DLC. */
+const PACKAGE_EXTRACT_OF_POST = 0.35;
+
+const DL_MSG = "Descargando desde el catálogo…";
+
+function emitDownloadProgress(
+  onProgress: ((p: CatalogInstallProgress) => void) | undefined,
+  bytesDone: number,
+  bytesTotal: number,
+  message = DL_MSG,
+): void {
+  onProgress?.({
+    phase: "downloading",
+    bytesDone: Math.max(0, Math.min(bytesDone, bytesTotal || bytesDone)),
+    bytesTotal,
+    message,
+  });
+}
+
+/** Mapea progreso de una etapa al total fijo del paquete (una sola barra). */
+function mapPackageProgress(
+  packageTotal: number,
+  rangeStart: number,
+  rangeEnd: number,
+  stageDone: number,
+  stageTotal: number,
+): number {
+  if (packageTotal <= 0) {
+    return stageDone;
+  }
+  const span = Math.max(0, rangeEnd - rangeStart);
+  if (stageTotal <= 0 || span <= 0) {
+    return rangeStart;
+  }
+  const ratio = Math.min(1, Math.max(0, stageDone / stageTotal));
+  return Math.min(packageTotal, Math.floor(rangeStart + ratio * span));
+}
+
 async function downloadCatalogPayload(
   catalog: CatalogGame,
   onProgress?: (p: CatalogInstallProgress) => void,
@@ -67,48 +109,57 @@ async function downloadCatalogPayload(
   destPath: string;
   coverLocalPath: string | null;
   installPaths: string[];
+  /** Tamaño del paquete en catálogo (total fijo del HUD). */
+  packageTotal: number;
+  /** Bytes de HUD al terminar esta función (antes del install DLC si aplica). */
+  hudBytesDone: number;
 }> {
   const dl = await catalogApiService.downloadUrl(catalog.id);
-  const bytesTotal = Number(dl.fileSizeBytes) || 0;
+  const packageTotal = Number(dl.fileSizeBytes) || 0;
+  const isZip = /\.zip$/i.test(dl.fileName);
+  /** Sin zip: la bajada es el 100%. Con zip: ~55% y el resto es unzip(+DLC). */
+  const downloadShare = isZip ? PACKAGE_DOWNLOAD_SHARE : 1;
+  const downloadEnd =
+    packageTotal > 0 ? Math.floor(packageTotal * downloadShare) : 0;
   const transferId = crypto.randomUUID();
   const baseDir = await catalogGamesDir();
   const gameDir = await joinPath(baseDir, catalog.id);
   const destPath = await joinPath(gameDir, dl.fileName);
 
   const unlisten = await listenTransferProgress(transferId, (p) => {
-    onProgress?.({
-      phase: "downloading",
-      bytesDone: p.bytesDone,
-      bytesTotal: p.bytesTotal,
-      message: "Descargando desde el catálogo…",
-    });
+    const stageTotal = p.bytesTotal > 0 ? p.bytesTotal : packageTotal;
+    const displayDone =
+      packageTotal > 0 && downloadShare < 1
+        ? mapPackageProgress(
+            packageTotal,
+            0,
+            downloadEnd,
+            p.bytesDone,
+            stageTotal,
+          )
+        : p.bytesDone;
+    const displayTotal = packageTotal > 0 ? packageTotal : p.bytesTotal;
+    emitDownloadProgress(onProgress, displayDone, displayTotal);
   });
 
   let coverLocalPath: string | null = null;
+  let hudBytesDone = 0;
   try {
-    onProgress?.({
-      phase: "downloading",
-      bytesDone: 0,
-      bytesTotal,
-      message: "Descargando desde el catálogo…",
-    });
+    emitDownloadProgress(onProgress, 0, packageTotal);
     await downloadFile({
       transferId,
       url: dl.url,
       destPath,
-      bytesTotal,
+      bytesTotal: packageTotal,
     });
+    hudBytesDone =
+      packageTotal > 0 && downloadShare < 1 ? downloadEnd : packageTotal;
+    emitDownloadProgress(onProgress, hudBytesDone, packageTotal);
 
     if (catalog.hasCover) {
       try {
         const cover = await catalogApiService.coverUrl(catalog.id);
         coverLocalPath = await joinPath(gameDir, cover.fileName);
-        onProgress?.({
-          phase: "downloading",
-          bytesDone: bytesTotal,
-          bytesTotal,
-          message: "Descargando portada…",
-        });
         await downloadFile({
           transferId: `${transferId}-cover`,
           url: cover.url,
@@ -127,16 +178,53 @@ async function downloadCatalogPayload(
 
   let playablePath = destPath;
   let installPaths: string[] = [];
-  if (/\.zip$/i.test(destPath)) {
-    onProgress?.({
-      phase: "installing",
-      bytesDone: bytesTotal,
-      bytesTotal,
-      message: "Descomprimiendo paquete del catálogo…",
-    });
-    const extracted = await extractCatalogZip(destPath, gameDir);
-    playablePath = extracted.primaryPath;
-    installPaths = extracted.installPaths;
+  if (isZip) {
+    const extractTransferId = crypto.randomUUID();
+    const postStart = downloadEnd;
+    const postEnd = packageTotal > 0 ? packageTotal : 0;
+    // Si hay DLC el unzip solo llega ~a un tramo; si no, el unzip llena hasta 100%.
+    // Anticipamos tramo corto; si no hay installPaths, al terminar empujamos a 100%.
+    const extractEndGuess =
+      packageTotal > 0
+        ? Math.floor(
+            postStart + (postEnd - postStart) * PACKAGE_EXTRACT_OF_POST,
+          )
+        : postStart;
+
+    const unlistenExtract = await listenTransferProgress(
+      extractTransferId,
+      (p) => {
+        const stageTotal = p.bytesTotal > 0 ? p.bytesTotal : 1;
+        const displayDone = mapPackageProgress(
+          packageTotal,
+          postStart,
+          extractEndGuess,
+          p.bytesDone,
+          stageTotal,
+        );
+        hudBytesDone = displayDone;
+        emitDownloadProgress(onProgress, displayDone, packageTotal);
+      },
+    );
+    try {
+      emitDownloadProgress(onProgress, postStart, packageTotal);
+      const extracted = await extractCatalogZip(
+        destPath,
+        gameDir,
+        extractTransferId,
+      );
+      playablePath = extracted.primaryPath;
+      installPaths = extracted.installPaths;
+      if (installPaths.length === 0) {
+        hudBytesDone = packageTotal;
+        emitDownloadProgress(onProgress, packageTotal, packageTotal);
+      } else {
+        hudBytesDone = extractEndGuess;
+        emitDownloadProgress(onProgress, extractEndGuess, packageTotal);
+      }
+    } finally {
+      unlistenExtract();
+    }
     try {
       await removePath(destPath);
     } catch {
@@ -144,7 +232,13 @@ async function downloadCatalogPayload(
     }
   }
 
-  return { destPath: playablePath, coverLocalPath, installPaths };
+  return {
+    destPath: playablePath,
+    coverLocalPath,
+    installPaths,
+    packageTotal,
+    hudBytesDone,
+  };
 }
 
 /**
@@ -195,6 +289,7 @@ export const catalogInstallService = {
     }
 
     const langs = resolveAvailableLanguages(catalog.availableLanguages);
+    const preferredLang = defaultPreferredLanguage(langs);
     const game = await gameService.createGame({
       title: catalog.title,
       description: catalog.description,
@@ -206,12 +301,13 @@ export const catalogInstallService = {
       coverPath: catalog.coverUrl,
       status: "published",
       availableLanguages: langs,
+      preferredLanguage: preferredLang,
     });
 
     const updatedAt = new Date().toISOString();
     await gameRepository.setStatus(game.id, "published", updatedAt);
     await gameRepository.setCatalogRemoteId(game.id, catalog.id, updatedAt);
-    await gameRepository.setLanguages(game.id, langs, null, updatedAt);
+    await gameRepository.setLanguages(game.id, langs, preferredLang, updatedAt);
 
     const fresh = await gameRepository.findById(game.id);
     if (!fresh) throw new Error("No se pudo agregar el juego a la biblioteca.");
@@ -298,48 +394,58 @@ export const catalogInstallService = {
       message: "Descargando juego…",
     });
 
-    const { destPath, coverLocalPath, installPaths } =
-      await downloadCatalogPayload(catalog, onProgress);
+    const {
+      destPath,
+      coverLocalPath,
+      installPaths,
+      packageTotal,
+      hudBytesDone: afterPayloadHud,
+    } = await downloadCatalogPayload(catalog, onProgress);
 
     if (installPaths.length > 0) {
       const installTransferId = crypto.randomUUID();
+      const installStart =
+        packageTotal > 0 ? Math.min(afterPayloadHud, packageTotal) : 0;
+      const installEnd = packageTotal > 0 ? packageTotal : 0;
       const unlistenInstall = await listenTransferProgress(
         installTransferId,
         (p) => {
-          onProgress?.({
-            phase: "installing",
-            bytesDone: p.bytesDone,
-            bytesTotal: p.bytesTotal,
-            message:
-              p.bytesTotal > 0
-                ? `Instalando update/DLC en Eden… (${formatBytes(p.bytesDone)} / ${formatBytes(p.bytesTotal)})`
-                : `Instalando ${installPaths.length} update/DLC en Eden…`,
-          });
+          const stageTotal = p.bytesTotal > 0 ? p.bytesTotal : 1;
+          const displayDone =
+            packageTotal > 0
+              ? mapPackageProgress(
+                  packageTotal,
+                  installStart,
+                  installEnd,
+                  p.bytesDone,
+                  stageTotal,
+                )
+              : p.bytesDone;
+          emitDownloadProgress(
+            onProgress,
+            displayDone,
+            packageTotal > 0 ? packageTotal : p.bytesTotal,
+          );
         },
       );
       try {
-        onProgress?.({
-          phase: "installing",
-          bytesDone: 0,
-          bytesTotal: 0,
-          message: `Instalando ${installPaths.length} update/DLC en Eden…`,
-        });
+        emitDownloadProgress(onProgress, installStart, packageTotal);
         await installEdenTitleNsps(
           runtime.executablePath,
           installPaths,
           installTransferId,
         );
+        if (packageTotal > 0) {
+          emitDownloadProgress(onProgress, packageTotal, packageTotal);
+        }
       } finally {
         unlistenInstall();
       }
     }
 
-    onProgress?.({
-      phase: "installing",
-      bytesDone: 0,
-      bytesTotal: 0,
-      message: "Actualizando rutas locales…",
-    });
+    if (packageTotal > 0) {
+      emitDownloadProgress(onProgress, packageTotal, packageTotal);
+    }
 
     await gameContentService.associate({ gameId, path: destPath });
     const resolvedLaunch = await resolveRetroArchLaunchArguments(

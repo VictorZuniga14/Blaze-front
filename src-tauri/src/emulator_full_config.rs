@@ -179,7 +179,7 @@ impl EmulatorConfigCapabilities {
             supports_audio_engine: false,  // Eden usa audio del sistema
             supports_ui_language: true,
             supports_hotkeys: false,  // Eden 0.2.1 no tiene hotkeys configurables
-            supports_controller_profiles: false,
+            supports_controller_profiles: true,
             available_renderers: vec![
                 "vulkan".into(),
                 "opengl".into(),
@@ -404,6 +404,24 @@ fn apply_eden_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), String> {
         }),
     ]);
 
+    // Sistema Switch: idioma de consola (juegos sin menú propio siguen esto).
+    // yuzu/Eden: 0=JA 1=EN 2=FR 3=DE 4=IT 5=ES …
+    let (lang_idx, region_idx) = match cfg.ui_language.as_str() {
+        "es" => ("5", "4"), // Spanish + Europe
+        "ja" => ("0", "0"),
+        _ => ("1", "1"), // English + USA
+    };
+    content = ini_set_section(
+        &content,
+        "System",
+        &[
+            ("language_index\\default", "false"),
+            ("language_index", lang_idx),
+            ("region_index\\default", "false"),
+            ("region_index", region_idx),
+        ],
+    );
+
     // Renderer
     content = ini_set_section(&content, "Renderer", &[
         ("resolution_setup", &(scale - 1).to_string()),
@@ -475,13 +493,17 @@ pub fn apply_escape_hotkey_policy(
     Ok(())
 }
 
-/// Activa backends de mando (SDL) en PCSX2/RetroArch. Eden: no-op (UI nativa).
+/// Activa backends de mando (SDL) en PCSX2/RetroArch; Eden asocia player_0 al pad.
 /// `layout`: auto | playstation | xbox
 pub fn apply_input_backend_policy(
     runtime_kind: &str,
     config_path: &Path,
     layout: &str,
 ) -> Result<(), String> {
+    let profile = if layout.is_empty() { "auto" } else { layout };
+    if runtime_kind == "eden" {
+        return crate::eden_input::apply_eden_input_backends(config_path, profile, None);
+    }
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -490,11 +512,9 @@ pub fn apply_input_backend_policy(
     } else {
         String::new()
     };
-    let profile = if layout.is_empty() { "auto" } else { layout };
     let next = match runtime_kind {
         "pcsx2" => apply_pcsx2_input_backends(&existing, profile),
         "retroarch" => apply_retroarch_input_backends(&existing, profile),
-        "eden" => return Ok(()),
         _ => return Ok(()),
     };
     if next != existing {

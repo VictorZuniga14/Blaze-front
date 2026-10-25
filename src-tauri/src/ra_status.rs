@@ -440,10 +440,21 @@ pub fn inspect_emulator_retroachievements(
 
 #[tauri::command]
 pub fn open_emulator_for_configuration(executable_path: String) -> Result<(), String> {
+    open_emulator_for_configuration_with_args(executable_path, &[])
+}
+
+/// Abre el emulador con args extra (p. ej. PCSX2 `-datapath` managed).
+pub fn open_emulator_for_configuration_with_args(
+    executable_path: String,
+    extra_args: &[String],
+) -> Result<(), String> {
     let exe = validate_exe(&executable_path)?;
     let mut cmd = Command::new(&exe);
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
+    }
+    for a in extra_args {
+        cmd.arg(a);
     }
     cmd.spawn()
         .map_err(|_| "No se pudo abrir el emulador.".to_string())?;

@@ -154,6 +154,18 @@ pub fn save_controller_prefs_file(
     let ra_cfg = managed_data_root(&app_data, "retroarch").join("retroarch.cfg");
     let _ = apply_input_backend_policy("pcsx2", &pcsx2_ini, &prefs.layout);
     let _ = apply_input_backend_policy("retroarch", &ra_cfg, &prefs.layout);
+    // BIOS PS2 → español por defecto (GoW 1 y similares).
+    let bios_dir = pcsx2_internal_data_root(&managed_data_root(&app_data, "pcsx2")).join("bios");
+    let _ = crate::pcsx2_bios_lang::ensure_pcsx2_bios_language(&bios_dir, "es");
+    // Eden: asociar DualShock/Xbox al player_0 (qt-config).
+    let preferred = prefs.preferred_device_guid.as_deref();
+    for eden_ini in crate::eden_input::find_eden_qt_config_paths(&app_data) {
+        let _ = crate::eden_input::apply_eden_input_backends(
+            &eden_ini,
+            &prefs.layout,
+            preferred,
+        );
+    }
     // Sidecar con GUID preferido (los emus no siempre lo leen; Blaze lo usa en tips/test).
     let _ = write_json(
         &prefs_path(&app_data, "blaze-preferred-pad.json"),
@@ -206,6 +218,8 @@ fn apply_emulation_prefs_to_managed(
         let _ = fs::create_dir_all(parent);
     }
     let _ = apply_full_config(&pcsx2_ini, &config_for_kind("pcsx2", emu, layout));
+    let bios_dir = pcsx2_internal_data_root(&managed_data_root(app_data, "pcsx2")).join("bios");
+    let _ = crate::pcsx2_bios_lang::ensure_pcsx2_bios_language(&bios_dir, "es");
 
     if let Some(parent) = ra_cfg.parent() {
         let _ = fs::create_dir_all(parent);
@@ -215,6 +229,21 @@ fn apply_emulation_prefs_to_managed(
     // Eden managed puede no tener qt-config aquí; best-effort.
     if eden_ini.parent().map(|p| p.exists()).unwrap_or(false) || eden_ini.exists() {
         let _ = apply_full_config(&eden_ini, &config_for_kind("eden", emu, layout));
+        let _ = crate::eden_input::apply_eden_input_backends(
+            &eden_ini,
+            layout,
+            pad.preferred_device_guid.as_deref(),
+        );
+    }
+    for path in crate::eden_input::find_eden_qt_config_paths(app_data) {
+        if path != eden_ini {
+            let _ = apply_full_config(&path, &config_for_kind("eden", emu, layout));
+        }
+        let _ = crate::eden_input::apply_eden_input_backends(
+            &path,
+            layout,
+            pad.preferred_device_guid.as_deref(),
+        );
     }
     Ok(())
 }
@@ -224,6 +253,7 @@ pub fn apply_profile_for_launch(
     app_data: &Path,
     runtime_kind: &str,
     config_path: &Path,
+    force_lang: Option<&str>,
 ) -> Result<(), String> {
     let emu = load_emulation_prefs(app_data);
     let pad = load_controller_prefs(app_data);
@@ -233,8 +263,25 @@ pub fn apply_profile_for_launch(
         "eden" | "switch" => "eden",
         other => other,
     };
-    let cfg = config_for_kind(kind, &emu, &pad.layout);
+    let mut cfg = config_for_kind(kind, &emu, &pad.layout);
+    if let Some(lang) = force_lang.map(str::trim).filter(|s| !s.is_empty()) {
+        cfg.ui_language = lang.to_string();
+    }
     apply_full_config(config_path, &cfg)?;
+    if kind == "eden" {
+        let _ = crate::eden_input::apply_eden_input_backends(
+            config_path,
+            &pad.layout,
+            pad.preferred_device_guid.as_deref(),
+        );
+    }
+    if kind == "pcsx2" {
+        if let Some(parent) = config_path.parent().and_then(|p| p.parent()) {
+            let bios = parent.join("bios");
+            let lang = force_lang.unwrap_or("es");
+            let _ = crate::pcsx2_bios_lang::ensure_pcsx2_bios_language(&bios, lang);
+        }
+    }
     Ok(())
 }
 
@@ -245,6 +292,7 @@ pub fn apply_launch_profile(
     exe: &Path,
     pcsx2_data_root: Option<&Path>,
     retroarch_cfg: Option<&Path>,
+    force_lang: Option<&str>,
 ) {
     let Ok(app_data) = app_data_dir(app) else {
         return;
@@ -282,7 +330,7 @@ pub fn apply_launch_profile(
     };
 
     if let Some(path) = path {
-        let _ = apply_profile_for_launch(&app_data, kind, &path);
+        let _ = apply_profile_for_launch(&app_data, kind, &path, force_lang);
     }
 }
 
