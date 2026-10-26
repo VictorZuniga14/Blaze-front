@@ -6,6 +6,8 @@ export type GameControllerInfo = {
   name: string;
   guid?: string;
   kind?: string;
+  /** Slot 1-based (Player 1, Player 2…). */
+  player?: number | null;
 };
 export type EdenAudioSettings = {
   outputEngine: string;

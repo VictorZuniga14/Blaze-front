@@ -1,11 +1,21 @@
-//! Asocia el mando preferido de Blaze a Eden (qt-config.ini player_0).
-//! Eden/yuzu guarda bindings como `engine:sdl,port:0,guid:<SDL_GUID>,…`.
+//! Asocia mandos detectados a Eden (qt-config.ini player_0..player_N).
+//! Eden/yuzu guarda bindings como `engine:sdl,port:<i>,guid:<SDL_GUID>,…`.
 
 use crate::controllers::{list_game_controllers_raw, GameControllerInfo};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Aplica Pro Controller + bindings SDL de player_0 según layout / mando preferido.
+const MAX_EDEN_PLAYERS: usize = 8;
+
+#[derive(Debug, Clone)]
+struct SdlPad {
+    guid: String,
+    kind: String,
+    /// Índice SDL / puerto (0 = P1).
+    port: u32,
+}
+
+/// Aplica Pro Controller + bindings SDL para todos los mandos conectados.
 pub fn apply_eden_input_backends(
     config_path: &Path,
     layout: &str,
@@ -21,19 +31,17 @@ pub fn apply_eden_input_backends(
         String::new()
     };
 
-    let kind = resolve_pad_kind(layout, preferred_gilrs_guid);
-    let Some(sdl_guid) = resolve_sdl_guid(&kind, &existing) else {
-        return Ok(());
-    };
+    let pads = resolve_sdl_pads(layout, preferred_gilrs_guid, &existing);
+    let mut next = ensure_controls_section(&existing);
 
-    let mut next = existing.clone();
-    next = ensure_controls_section(&next);
-    next = set_player0_meta(&next);
-    next = if player0_uses_sdl(&next) {
-        replace_player0_guid(&next, &sdl_guid)
-    } else {
-        write_player0_sdl_template(&next, &sdl_guid, &kind)
-    };
+    for i in 0..MAX_EDEN_PLAYERS {
+        if let Some(pad) = pads.get(i) {
+            next = set_player_meta(&next, i, true);
+            next = write_player_sdl_template(&next, i, &pad.guid, pad.port, &pad.kind);
+        } else {
+            next = set_player_meta(&next, i, false);
+        }
+    }
 
     if next != existing {
         fs::write(config_path, next).map_err(|e| e.to_string())?;
@@ -99,62 +107,125 @@ fn pick_preferred<'a>(
     })
 }
 
-fn resolve_sdl_guid(kind: &str, existing: &str) -> Option<String> {
-    if let Some(g) = discover_sdl_guid(kind) {
-        return Some(g);
-    }
-    if let Some(g) = extract_player0_guid(existing) {
-        return Some(g);
-    }
-    // Solo fallback fijo si gilrs/XInput ve un mando de ese tipo (GUID típico DS4/Xbox).
-    let has_pad = list_game_controllers_raw()
-        .ok()
-        .map(|pads| {
-            pads.iter().any(|p| {
-                p.id != "none"
-                    && (kind == "generic"
-                        || p.kind == kind
-                        || (kind == "playstation" && p.kind == "playstation")
-                        || (kind == "xbox" && p.kind == "xbox"))
-            })
-        })
-        .unwrap_or(false);
-    if !has_pad {
-        return None;
-    }
-    Some(match kind {
-        "xbox" => "030000005e040000e002000000007801".into(),
-        _ => "030000004c050000c405000000016800".into(),
-    })
-}
+/// Ordena mandos: preferido primero, luego el resto (hasta MAX_EDEN_PLAYERS).
+fn resolve_sdl_pads(
+    layout: &str,
+    preferred: Option<&str>,
+    existing: &str,
+) -> Vec<SdlPad> {
+    let default_kind = resolve_pad_kind(layout, preferred);
+    let mut discovered = discover_all_sdl_pads();
 
-fn discover_sdl_guid(kind: &str) -> Option<String> {
-    #[cfg(windows)]
-    {
-        let pads = list_hid_gamepads();
-        let filtered: Vec<_> = pads
-            .into_iter()
-            .filter(|p| match kind {
-                "playstation" => p.vendor == 0x054c,
-                "xbox" => p.vendor == 0x045e,
-                _ => true,
-            })
-            .collect();
-        if let Some(p) = filtered.first() {
-            return Some(sdl_guid_usb(p.vendor, p.product, p.version, b'h'));
-        }
-        if kind == "xbox" || kind == "generic" {
-            use windows_sys::Win32::UI::Input::XboxController::XInputGetState;
-            unsafe {
-                let mut state = std::mem::zeroed();
-                if XInputGetState(0, &mut state) == 0 {
-                    return Some("030000005e040000e002000000007801".into());
+    // Preferido al frente si podemos mapearlo a un GUID conocido.
+    if let Some(pref) = preferred.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Ok(gilrs_pads) = list_game_controllers_raw() {
+            if let Some(p) = pick_preferred(&gilrs_pads, Some(pref)) {
+                // Buscar HID del mismo tipo y ponerlo primero; si no, insertar fallback.
+                if let Some(idx) = discovered.iter().position(|d| d.kind == p.kind) {
+                    let pad = discovered.remove(idx);
+                    discovered.insert(0, pad);
+                } else if discovered.is_empty() {
+                    let kind = if layout.eq_ignore_ascii_case("auto") {
+                        p.kind.clone()
+                    } else {
+                        default_kind.clone()
+                    };
+                    let guid = fallback_guid_for_kind(&kind)
+                        .or_else(|| extract_player0_guid(existing))
+                        .unwrap_or_else(|| fallback_guid_for_kind("playstation").unwrap());
+                    discovered.push(SdlPad {
+                        guid,
+                        kind,
+                        port: 0,
+                    });
                 }
             }
         }
     }
-    let _ = kind;
-    None
+
+    // Completar hasta la cantidad que ve gilrs/XInput (2 mandos iguales, etc.).
+    if let Ok(pads) = list_game_controllers_raw() {
+        while discovered.len() < pads.len().min(MAX_EDEN_PLAYERS) {
+            let i = discovered.len();
+            let p = &pads[i];
+            let kind = if layout.eq_ignore_ascii_case("auto") {
+                p.kind.clone()
+            } else {
+                default_kind.clone()
+            };
+            let guid = fallback_guid_for_kind(&kind)
+                .or_else(|| extract_player0_guid(existing))
+                .unwrap_or_else(|| "030000004c050000c405000000016800".into());
+            discovered.push(SdlPad {
+                guid,
+                kind,
+                port: i as u32,
+            });
+        }
+    }
+
+    // Reasignar ports 0..N-1 en el orden final.
+    for (i, pad) in discovered.iter_mut().enumerate() {
+        pad.port = i as u32;
+        if !layout.eq_ignore_ascii_case("auto")
+            && (layout.eq_ignore_ascii_case("playstation") || layout.eq_ignore_ascii_case("xbox"))
+        {
+            pad.kind = default_kind.clone();
+        }
+    }
+
+    discovered.truncate(MAX_EDEN_PLAYERS);
+    discovered
+}
+
+fn fallback_guid_for_kind(kind: &str) -> Option<String> {
+    Some(match kind {
+        "xbox" => "030000005e040000e002000000007801".into(),
+        "playstation" | "generic" => "030000004c050000c405000000016800".into(),
+        _ => return None,
+    })
+}
+
+fn discover_all_sdl_pads() -> Vec<SdlPad> {
+    let mut out = Vec::new();
+    #[cfg(windows)]
+    {
+        let pads = list_hid_gamepads();
+        for (i, p) in pads.into_iter().enumerate() {
+            let kind = if p.vendor == 0x054c {
+                "playstation".into()
+            } else if p.vendor == 0x045e {
+                "xbox".into()
+            } else if p.vendor == 0x057e {
+                "generic".into() // Switch Pro-ish
+            } else {
+                "generic".into()
+            };
+            out.push(SdlPad {
+                guid: sdl_guid_usb(p.vendor, p.product, p.version, b'h'),
+                kind,
+                port: i as u32,
+            });
+        }
+        // XInput slots no vistos como HID (Xbox pads virtuales).
+        if out.iter().all(|p| p.kind != "xbox") {
+            use windows_sys::Win32::UI::Input::XboxController::XInputGetState;
+            unsafe {
+                for i in 0u32..4 {
+                    let mut state = std::mem::zeroed();
+                    if XInputGetState(i, &mut state) == 0 {
+                        out.push(SdlPad {
+                            guid: "030000005e040000e002000000007801".into(),
+                            kind: "xbox".into(),
+                            port: out.len() as u32,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    let _ = &out;
+    out
 }
 
 #[cfg(windows)]
@@ -230,7 +301,6 @@ fn list_hid_gamepads() -> Vec<HidPad> {
             let hid = info.Anonymous.hid;
             let page = hid.usUsagePage;
             let usage = hid.usUsage;
-            // Generic Desktop: Joystick (4) / Game Pad (5)
             if page != 0x01 || (usage != 0x04 && usage != 0x05) {
                 continue;
             }
@@ -291,13 +361,6 @@ fn extract_player0_guid(content: &str) -> Option<String> {
     None
 }
 
-fn player0_uses_sdl(content: &str) -> bool {
-    content.lines().any(|l| {
-        let t = l.trim();
-        t.starts_with("player_0_button_a=") && t.contains("engine:sdl")
-    })
-}
-
 fn ensure_controls_section(content: &str) -> String {
     if content
         .lines()
@@ -311,48 +374,34 @@ fn ensure_controls_section(content: &str) -> String {
     }
 }
 
-fn set_player0_meta(content: &str) -> String {
+fn set_player_meta(content: &str, player: usize, connected: bool) -> String {
+    let p = format!("player_{player}");
     let pairs = vec![
-        ("player_0_type\\default".into(), "false".into()),
-        ("player_0_type".into(), "0".into()),
-        ("player_0_connected\\default".into(), "false".into()),
-        ("player_0_connected".into(), "true".into()),
-        ("player_0_vibration_enabled\\default".into(), "false".into()),
-        ("player_0_vibration_enabled".into(), "true".into()),
+        (format!("{p}_type\\default"), "false".into()),
+        (format!("{p}_type"), "0".into()),
+        (format!("{p}_connected\\default"), "false".into()),
+        (
+            format!("{p}_connected"),
+            if connected { "true" } else { "false" }.into(),
+        ),
+        (format!("{p}_vibration_enabled\\default"), "false".into()),
+        (format!("{p}_vibration_enabled"), "true".into()),
     ];
     ini_set_controls_owned(content, &pairs)
 }
 
-fn replace_player0_guid(content: &str, new_guid: &str) -> String {
-    let mut out = String::with_capacity(content.len());
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("player_0_") && trimmed.contains("guid:") {
-            if let Some(idx) = trimmed.find("guid:") {
-                let start = idx + 5;
-                let rest = &trimmed[start..];
-                let end = rest
-                    .find(|c: char| !c.is_ascii_hexdigit())
-                    .unwrap_or(rest.len());
-                out.push_str(&trimmed[..start]);
-                out.push_str(new_guid);
-                out.push_str(&rest[end..]);
-                out.push('\n');
-                continue;
-            }
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
-}
-
-fn write_player0_sdl_template(content: &str, guid: &str, kind: &str) -> String {
-    let pairs = player0_sdl_pairs(guid, kind);
+fn write_player_sdl_template(
+    content: &str,
+    player: usize,
+    guid: &str,
+    port: u32,
+    kind: &str,
+) -> String {
+    let pairs = player_sdl_pairs(player, guid, port, kind);
     ini_set_controls_owned(content, &pairs)
 }
 
-fn player0_sdl_pairs(guid: &str, kind: &str) -> Vec<(String, String)> {
+fn player_sdl_pairs(player: usize, guid: &str, port: u32, kind: &str) -> Vec<(String, String)> {
     let (a, b, x, y, lstick, rstick, l, r, zl, zr, plus, minus, dleft, dup, dright, ddown, home) =
         if kind == "xbox" {
             (
@@ -396,70 +445,74 @@ fn player0_sdl_pairs(guid: &str, kind: &str) -> Vec<(String, String)> {
             )
         };
 
-    // Qt INI: valores con comas van entre comillas (como escribe Eden).
     let q = |s: String| format!("\"{s}\"");
-    let bind = |suffix: &str| q(format!("engine:sdl,port:0,guid:{guid},{suffix}"));
-    let stick = |axes: &str| {
+    let bind = |suffix: &str| {
         q(format!(
-            "engine:sdl,port:0,guid:{guid},{axes},offset_x:-0.000000,offset_y:0.000000,invert_x:+,invert_y:+,deadzone:0.150000"
+            "engine:sdl,port:{port},guid:{guid},{suffix}"
         ))
     };
-    let motion = || q(format!("engine:sdl,motion:0,port:0,guid:{guid}"));
+    let stick = |axes: &str| {
+        q(format!(
+            "engine:sdl,port:{port},guid:{guid},{axes},offset_x:-0.000000,offset_y:0.000000,invert_x:+,invert_y:+,deadzone:0.150000"
+        ))
+    };
+    let motion = || q(format!("engine:sdl,motion:0,port:{port},guid:{guid}"));
+    let p = format!("player_{player}");
 
     let mut out: Vec<(String, String)> = Vec::new();
     let mut add = |k: &str, v: String| out.push((k.to_string(), v));
-    add("player_0_button_a\\default", "false".into());
-    add("player_0_button_a", bind(a));
-    add("player_0_button_b\\default", "false".into());
-    add("player_0_button_b", bind(b));
-    add("player_0_button_x\\default", "false".into());
-    add("player_0_button_x", bind(x));
-    add("player_0_button_y\\default", "false".into());
-    add("player_0_button_y", bind(y));
-    add("player_0_button_lstick\\default", "false".into());
-    add("player_0_button_lstick", bind(lstick));
-    add("player_0_button_rstick\\default", "false".into());
-    add("player_0_button_rstick", bind(rstick));
-    add("player_0_button_l\\default", "false".into());
-    add("player_0_button_l", bind(l));
-    add("player_0_button_r\\default", "false".into());
-    add("player_0_button_r", bind(r));
-    add("player_0_button_zl\\default", "false".into());
-    add("player_0_button_zl", bind(zl));
-    add("player_0_button_zr\\default", "false".into());
-    add("player_0_button_zr", bind(zr));
-    add("player_0_button_plus\\default", "false".into());
-    add("player_0_button_plus", bind(plus));
-    add("player_0_button_minus\\default", "false".into());
-    add("player_0_button_minus", bind(minus));
-    add("player_0_button_dleft\\default", "false".into());
-    add("player_0_button_dleft", bind(dleft));
-    add("player_0_button_dup\\default", "false".into());
-    add("player_0_button_dup", bind(dup));
-    add("player_0_button_dright\\default", "false".into());
-    add("player_0_button_dright", bind(dright));
-    add("player_0_button_ddown\\default", "false".into());
-    add("player_0_button_ddown", bind(ddown));
-    add("player_0_button_home\\default", "false".into());
-    add("player_0_button_home", bind(home));
-    add("player_0_button_screenshot\\default", "false".into());
-    add("player_0_button_screenshot", "[empty]".into());
-    add("player_0_button_slleft\\default", "false".into());
-    add("player_0_button_slleft", bind(l));
-    add("player_0_button_srleft\\default", "false".into());
-    add("player_0_button_srleft", bind(r));
-    add("player_0_button_slright\\default", "false".into());
-    add("player_0_button_slright", bind(l));
-    add("player_0_button_srright\\default", "false".into());
-    add("player_0_button_srright", bind(r));
-    add("player_0_lstick\\default", "false".into());
-    add("player_0_lstick", stick("axis_x:0,axis_y:1"));
-    add("player_0_rstick\\default", "false".into());
-    add("player_0_rstick", stick("axis_x:2,axis_y:3"));
-    add("player_0_motionleft\\default", "false".into());
-    add("player_0_motionleft", motion());
-    add("player_0_motionright\\default", "false".into());
-    add("player_0_motionright", motion());
+    add(&format!("{p}_button_a\\default"), "false".into());
+    add(&format!("{p}_button_a"), bind(a));
+    add(&format!("{p}_button_b\\default"), "false".into());
+    add(&format!("{p}_button_b"), bind(b));
+    add(&format!("{p}_button_x\\default"), "false".into());
+    add(&format!("{p}_button_x"), bind(x));
+    add(&format!("{p}_button_y\\default"), "false".into());
+    add(&format!("{p}_button_y"), bind(y));
+    add(&format!("{p}_button_lstick\\default"), "false".into());
+    add(&format!("{p}_button_lstick"), bind(lstick));
+    add(&format!("{p}_button_rstick\\default"), "false".into());
+    add(&format!("{p}_button_rstick"), bind(rstick));
+    add(&format!("{p}_button_l\\default"), "false".into());
+    add(&format!("{p}_button_l"), bind(l));
+    add(&format!("{p}_button_r\\default"), "false".into());
+    add(&format!("{p}_button_r"), bind(r));
+    add(&format!("{p}_button_zl\\default"), "false".into());
+    add(&format!("{p}_button_zl"), bind(zl));
+    add(&format!("{p}_button_zr\\default"), "false".into());
+    add(&format!("{p}_button_zr"), bind(zr));
+    add(&format!("{p}_button_plus\\default"), "false".into());
+    add(&format!("{p}_button_plus"), bind(plus));
+    add(&format!("{p}_button_minus\\default"), "false".into());
+    add(&format!("{p}_button_minus"), bind(minus));
+    add(&format!("{p}_button_dleft\\default"), "false".into());
+    add(&format!("{p}_button_dleft"), bind(dleft));
+    add(&format!("{p}_button_dup\\default"), "false".into());
+    add(&format!("{p}_button_dup"), bind(dup));
+    add(&format!("{p}_button_dright\\default"), "false".into());
+    add(&format!("{p}_button_dright"), bind(dright));
+    add(&format!("{p}_button_ddown\\default"), "false".into());
+    add(&format!("{p}_button_ddown"), bind(ddown));
+    add(&format!("{p}_button_home\\default"), "false".into());
+    add(&format!("{p}_button_home"), bind(home));
+    add(&format!("{p}_button_screenshot\\default"), "false".into());
+    add(&format!("{p}_button_screenshot"), "[empty]".into());
+    add(&format!("{p}_button_slleft\\default"), "false".into());
+    add(&format!("{p}_button_slleft"), bind(l));
+    add(&format!("{p}_button_srleft\\default"), "false".into());
+    add(&format!("{p}_button_srleft"), bind(r));
+    add(&format!("{p}_button_slright\\default"), "false".into());
+    add(&format!("{p}_button_slright"), bind(l));
+    add(&format!("{p}_button_srright\\default"), "false".into());
+    add(&format!("{p}_button_srright"), bind(r));
+    add(&format!("{p}_lstick\\default"), "false".into());
+    add(&format!("{p}_lstick"), stick("axis_x:0,axis_y:1"));
+    add(&format!("{p}_rstick\\default"), "false".into());
+    add(&format!("{p}_rstick"), stick("axis_x:2,axis_y:3"));
+    add(&format!("{p}_motionleft\\default"), "false".into());
+    add(&format!("{p}_motionleft"), motion());
+    add(&format!("{p}_motionright\\default"), "false".into());
+    add(&format!("{p}_motionright"), motion());
     out
 }
 

@@ -258,9 +258,13 @@ fn apply_pcsx2_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), String> {
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
-/// Activa SDL + XInput y Pad1 DualShock2 (la consola emulada siempre es DS2).
+/// Activa SDL + XInput y Pad1..PadN DualShock2 según mandos conectados.
 fn apply_pcsx2_input_backends(content: &str, layout: &str) -> String {
-    let _ = layout; // layout guía preferencia en UI; PCSX2 recibe el pad vía SDL.
+    let _ = layout;
+    let pad_count = crate::controllers::list_game_controllers_raw()
+        .map(|p| p.len().clamp(1, 8))
+        .unwrap_or(1);
+
     let mut next = ini_set_section(
         content,
         "InputSources",
@@ -271,12 +275,64 @@ fn apply_pcsx2_input_backends(content: &str, layout: &str) -> String {
             ("Mouse", "true"),
         ],
     );
-    next = ini_set_section(
-        &next,
-        "Pad1",
-        &[("Type", "DualShock2")],
-    );
+
+    for i in 0..pad_count {
+        let section = format!("Pad{}", i + 1);
+        let sdl = format!("SDL-{i}");
+        next = apply_pcsx2_pad_section(&next, &section, &sdl);
+    }
+    // Desactivar pads sobrantes (Type=None) hasta Pad8.
+    for i in pad_count..8 {
+        let section = format!("Pad{}", i + 1);
+        next = ini_set_section(&next, &section, &[("Type", "None")]);
+    }
     next
+}
+
+fn apply_pcsx2_pad_section(content: &str, section: &str, sdl: &str) -> String {
+    let b = |suffix: &str| format!("{sdl}/{suffix}");
+    let vals = [
+        b("DPadUp"),
+        b("DPadRight"),
+        b("DPadDown"),
+        b("DPadLeft"),
+        b("FaceNorth"),
+        b("FaceEast"),
+        b("FaceSouth"),
+        b("FaceWest"),
+        b("Back"),
+        b("Start"),
+        b("LeftShoulder"),
+        b("+LeftTrigger"),
+        b("RightShoulder"),
+        b("+RightTrigger"),
+        b("LeftStick"),
+        b("RightStick"),
+        b("Guide"),
+        b("-LeftY"),
+        b("+LeftX"),
+        b("+LeftY"),
+        b("-LeftX"),
+        b("-RightY"),
+        b("+RightX"),
+        b("+RightY"),
+        b("-RightX"),
+        b("LargeMotor"),
+        b("SmallMotor"),
+        "DualShock2".to_string(),
+    ];
+    let keys = [
+        "Up", "Right", "Down", "Left", "Triangle", "Circle", "Cross", "Square",
+        "Select", "Start", "L1", "L2", "R1", "R2", "L3", "R3", "Analog",
+        "LUp", "LRight", "LDown", "LLeft", "RUp", "RRight", "RDown", "RLeft",
+        "LargeMotor", "SmallMotor", "Type",
+    ];
+    let pairs: Vec<(&str, &str)> = keys
+        .iter()
+        .zip(vals.iter())
+        .map(|(k, v)| (*k, v.as_str()))
+        .collect();
+    ini_set_section(content, section, &pairs)
 }
 
 /// PCSX2: Escape → ToggleFullscreen; Exit sin bind (no menú / no cerrar con Esc).
@@ -359,11 +415,37 @@ fn apply_retroarch_config(path: &Path, cfg: &EmulatorConfig) -> Result<(), Strin
 
 fn apply_retroarch_input_backends(content: &str, layout: &str) -> String {
     let _ = layout;
-    let pairs = [
-        ("input_joypad_driver", "sdl2".to_string()),
-        ("input_autodetect_enable", "true".to_string()),
-        ("input_auto_game_focus", "1".to_string()),
-    ];
+    let pad_count = crate::controllers::list_game_controllers_raw()
+        .map(|p| p.len().clamp(1, 8))
+        .unwrap_or(1);
+
+    let mut keys: Vec<String> = Vec::new();
+    let mut vals: Vec<String> = Vec::new();
+    let mut push = |k: String, v: String| {
+        keys.push(k);
+        vals.push(v);
+    };
+    push("input_joypad_driver".into(), "sdl2".into());
+    push("input_autodetect_enable".into(), "true".into());
+    push("input_auto_game_focus".into(), "1".into());
+    push("input_max_users".into(), pad_count.to_string());
+    for i in 0..8 {
+        let player = i + 1;
+        if i < pad_count {
+            push(format!("input_player{player}_joypad_index"), i.to_string());
+            push(
+                format!("input_player{player}_analog_dpad_mode"),
+                "0".into(),
+            );
+        } else {
+            push(format!("input_player{player}_joypad_index"), "-1".into());
+        }
+    }
+    let pairs: Vec<(&str, String)> = keys
+        .iter()
+        .zip(vals.into_iter())
+        .map(|(k, v)| (k.as_str(), v))
+        .collect();
     cfg_set_multiple(content, &pairs)
 }
 
@@ -493,7 +575,7 @@ pub fn apply_escape_hotkey_policy(
     Ok(())
 }
 
-/// Activa backends de mando (SDL) en PCSX2/RetroArch; Eden asocia player_0 al pad.
+/// Activa backends de mando (SDL) en PCSX2/RetroArch; Eden asocia player_0..N.
 /// `layout`: auto | playstation | xbox
 pub fn apply_input_backend_policy(
     runtime_kind: &str,

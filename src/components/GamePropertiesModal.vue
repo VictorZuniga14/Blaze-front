@@ -237,6 +237,14 @@ function controllerKindLabel(kind: string | undefined): string {
   return "";
 }
 
+function controllerPlayerLabel(c: GameControllerInfo): string {
+  if (c.id === "none" || !c.player) return c.name;
+  const kind = controllerKindLabel(c.kind);
+  return kind
+    ? `Player ${c.player} — ${c.name} · ${kind}`
+    : `Player ${c.player} — ${c.name}`;
+}
+
 async function loadAll(): Promise<void> {
   error.value = null;
   okMsg.value = null;
@@ -524,21 +532,18 @@ function close(): void {
 
           <template v-else-if="tab === 'pads'">
             <p class="props-hint props-hint--block">
-              Elegí layout y mando según lo que tengas conectado. Se aplica al
-              jugar (PCSX2 / RetroArch / Eden).
+              1 mando → Player 1; 2 mandos → Player 1 y Player 2. Se aplica al
+              jugar en PCSX2 / RetroArch / Eden.
             </p>
 
             <div class="props-controllers">
-              <p class="props-controllers__label">Detectados</p>
+              <p class="props-controllers__label">
+                Jugadores detectados
+                <span v-if="padChoices.length">({{ padChoices.length }})</span>
+              </p>
               <ul>
                 <li v-for="c in controllers" :key="c.id">
-                  {{ c.name
-                  }}<span
-                    v-if="controllerKindLabel(c.kind)"
-                    class="props-controllers__kind"
-                  >
-                    ({{ controllerKindLabel(c.kind) }})
-                  </span>
+                  {{ controllerPlayerLabel(c) }}
                 </li>
               </ul>
               <button
@@ -569,7 +574,7 @@ function close(): void {
             </label>
 
             <label class="props-field">
-              <span>Mando principal</span>
+              <span>Mando principal (Player 1)</span>
               <select
                 v-model="preferredGuid"
                 class="props-select"
@@ -581,7 +586,7 @@ function close(): void {
                   :key="c.id"
                   :value="c.guid || c.id"
                 >
-                  {{ c.name }}
+                  {{ controllerPlayerLabel(c) }}
                 </option>
               </select>
             </label>

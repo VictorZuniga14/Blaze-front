@@ -7,6 +7,8 @@ export type GameControllerInfo = {
   guid?: string;
   /** playstation | xbox | generic */
   kind?: string;
+  /** Slot 1-based (Player 1, Player 2…). Ausente si no hay mando. */
+  player?: number | null;
 };
 export type RuntimeAudioSettings = {
   runtimeKind: string;

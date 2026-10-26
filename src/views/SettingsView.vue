@@ -164,6 +164,14 @@ function controllerKindLabel(kind: string | undefined): string {
   return "";
 }
 
+function controllerPlayerLabel(c: GameControllerInfo): string {
+  if (c.id === "none" || !c.player) return c.name;
+  const kind = controllerKindLabel(c.kind);
+  return kind
+    ? `Player ${c.player} — ${c.name} · ${kind}`
+    : `Player ${c.player} — ${c.name}`;
+}
+
 async function loadEmulationSection() {
   emuSaveErr.value = null;
   try {
@@ -454,28 +462,25 @@ function entryDot(statusCode: string): string {
     <section class="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-6">
       <h2 class="mb-1 text-lg font-medium text-white">Mandos</h2>
       <p class="mb-4 text-sm text-slate-400">
-        Misma config que ven los jugadores en Propiedades → Mandos.
-        Detección HID + Xbox; SDL al lanzar. Eden: conectá y jugá.
+        Si hay 1 mando → Player 1; si hay 2 → Player 1 y Player 2 (y así).
+        Se aplica solo al jugar en PCSX2, RetroArch y Eden.
       </p>
       <p v-if="controllerErr" class="mb-3 text-sm text-rose-300">{{ controllerErr }}</p>
       <p v-if="controllerMsg" class="mb-3 text-sm text-emerald-300">{{ controllerMsg }}</p>
 
       <div class="mb-4">
         <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-          Detectados
+          Jugadores detectados
+          <span v-if="controllers.filter((x) => x.id !== 'none').length" class="normal-case text-slate-400">
+            ({{ controllers.filter((x) => x.id !== 'none').length }})
+          </span>
         </p>
         <ul
           v-if="controllers.length"
           class="mb-2 space-y-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-200"
         >
           <li v-for="c in controllers" :key="c.id">
-            {{ c.name }}
-            <span
-              v-if="controllerKindLabel(c.kind)"
-              class="text-slate-500"
-            >
-              · {{ controllerKindLabel(c.kind) }}
-            </span>
+            {{ controllerPlayerLabel(c) }}
           </li>
         </ul>
         <button
@@ -504,7 +509,7 @@ function entryDot(statusCode: string): string {
       </label>
 
       <label class="mb-4 block text-sm text-slate-300">
-        Mando principal
+        Mando principal (Player 1)
         <select
           v-model="preferredGuid"
           class="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white"
@@ -515,7 +520,7 @@ function entryDot(statusCode: string): string {
             :key="c.id"
             :value="c.guid || c.id"
           >
-            {{ c.name }}
+            {{ controllerPlayerLabel(c) }}
           </option>
         </select>
       </label>

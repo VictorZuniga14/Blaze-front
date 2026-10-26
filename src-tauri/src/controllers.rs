@@ -18,9 +18,11 @@ pub struct GameControllerInfo {
     pub guid: String,
     /// `playstation` | `xbox` | `generic`
     pub kind: String,
+    /// Slot de jugador 1-based (Player 1, Player 2…). `None` si es ítem informativo.
+    pub player: Option<u32>,
 }
 
-/// Lista mandos reales (sin el ítem informativo “ninguno”).
+/// Lista mandos reales (sin el ítem informativo “ninguno”), ordenados P1..Pn.
 pub fn list_game_controllers_raw() -> Result<Vec<GameControllerInfo>, String> {
     let mut out = match list_via_gilrs() {
         Ok(list) => list,
@@ -32,11 +34,37 @@ pub fn list_game_controllers_raw() -> Result<Vec<GameControllerInfo>, String> {
                 out.push(pad);
             }
         }
+    } else {
+        // Mezclar XInput si gilrs no los vio.
+        for pad in list_via_xinput() {
+            if !out.iter().any(|p| p.id == pad.id || p.name == pad.name) {
+                out.push(pad);
+            }
+        }
     }
-    Ok(out
+    let mut out: Vec<_> = out
         .into_iter()
         .filter(|p| p.id != "none" && !p.guid.is_empty())
-        .collect())
+        .collect();
+    assign_player_slots(&mut out, None);
+    Ok(out)
+}
+
+/// Preferido → Player 1; resto en orden de detección → Player 2…N.
+pub fn assign_player_slots(pads: &mut [GameControllerInfo], preferred: Option<&str>) {
+    if let Some(want) = preferred.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(idx) = pads.iter().position(|p| {
+            p.guid == want
+                || p.id == want
+                || p.guid.contains(want)
+                || want.contains(&p.guid)
+        }) {
+            pads.swap(0, idx);
+        }
+    }
+    for (i, p) in pads.iter_mut().enumerate() {
+        p.player = Some((i as u32) + 1);
+    }
 }
 
 fn classify_kind(name: &str) -> String {
@@ -64,12 +92,13 @@ fn classify_kind(name: &str) -> String {
 }
 
 /// Lista mandos conectados. Vacío → un ítem informativo (no error).
+/// Cada mando real trae `player` = 1, 2, 3… según orden (preferido primero si hay prefs).
 #[tauri::command]
-pub fn list_game_controllers() -> Result<Vec<GameControllerInfo>, String> {
+pub fn list_game_controllers(app: AppHandle) -> Result<Vec<GameControllerInfo>, String> {
+    let preferred = load_preferred_guid(&app);
     let mut out = match list_via_gilrs() {
         Ok(list) => list,
         Err(e) => {
-            // Fallback XInput si gilrs falla al init.
             let xinput = list_via_xinput();
             if xinput.is_empty() {
                 return Ok(vec![GameControllerInfo {
@@ -79,6 +108,7 @@ pub fn list_game_controllers() -> Result<Vec<GameControllerInfo>, String> {
                     ),
                     guid: "".into(),
                     kind: "generic".into(),
+                    player: None,
                 }]);
             }
             xinput
@@ -86,7 +116,6 @@ pub fn list_game_controllers() -> Result<Vec<GameControllerInfo>, String> {
     };
 
     if out.is_empty() {
-        // Mezclar XInput por si gilrs no vio pads Xbox-only.
         let xinput = list_via_xinput();
         for pad in xinput {
             if !out.iter().any(|p| p.id == pad.id || p.name == pad.name) {
@@ -102,10 +131,27 @@ pub fn list_game_controllers() -> Result<Vec<GameControllerInfo>, String> {
                 .into(),
             guid: "".into(),
             kind: "generic".into(),
+            player: None,
         });
+        return Ok(out);
     }
 
+    out.retain(|p| p.id != "none" && !p.guid.is_empty());
+    assign_player_slots(&mut out, preferred.as_deref());
     Ok(out)
+}
+
+fn load_preferred_guid(app: &AppHandle) -> Option<String> {
+    let app_data = app_data_dir(app).ok()?;
+    let path = app_data.join("blaze-controller-prefs.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("preferredDeviceGuid")
+        .or_else(|| v.get("preferred_device_guid"))
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 fn list_via_gilrs() -> Result<Vec<GameControllerInfo>, String> {
@@ -136,6 +182,7 @@ fn list_via_gilrs() -> Result<Vec<GameControllerInfo>, String> {
             name,
             guid,
             kind,
+            player: None,
         });
     }
     Ok(out)
@@ -158,9 +205,13 @@ pub fn apply_controller_layout_prefs(
     let ra_cfg = managed_data_root(&app_data, "retroarch").join("retroarch.cfg");
     let _ = apply_input_backend_policy("pcsx2", &pcsx2_ini, &layout);
     let _ = apply_input_backend_policy("retroarch", &ra_cfg, &layout);
-    // preferred GUID ya está en blaze-preferred-pad.json / se aplica al Guardar mandos.
+    let preferred = load_preferred_guid(&app);
     for eden_ini in crate::eden_input::find_eden_qt_config_paths(&app_data) {
-        let _ = crate::eden_input::apply_eden_input_backends(&eden_ini, &layout, None);
+        let _ = crate::eden_input::apply_eden_input_backends(
+            &eden_ini,
+            &layout,
+            preferred.as_deref(),
+        );
     }
     Ok(())
 }
@@ -218,6 +269,7 @@ fn list_via_xinput() -> Vec<GameControllerInfo> {
                         name: name.clone(),
                         guid: format!("xinput-{i}"),
                         kind: "xbox".into(),
+                        player: None,
                     });
                 }
             }
