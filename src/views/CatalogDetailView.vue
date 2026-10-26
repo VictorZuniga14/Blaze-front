@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "../stores/auth";
 import { useLibraryStore } from "../stores/library";
+import { useCatalogCoversStore } from "../stores/catalogCovers";
 import { useCatalogDownloadStore } from "../stores/catalogDownload";
 import { catalogApiService } from "../services/catalogApi.service";
 import { catalogInstallService } from "../services/catalogInstall.service";
@@ -21,6 +22,7 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const library = useLibraryStore();
+const catalogCovers = useCatalogCoversStore();
 const catalogDownloads = useCatalogDownloadStore();
 const { isAuthenticated } = storeToRefs(auth);
 
@@ -62,7 +64,11 @@ const tags = computed(() =>
   }),
 );
 
-const bannerSrc = computed(() => resolveGameBanner(game.value?.title));
+const bannerSrc = computed(() => {
+  const remote = game.value?.bannerUrl?.trim();
+  if (remote) return remote;
+  return resolveGameBanner(game.value?.title);
+});
 
 function userFacing(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.message) return err.message;
@@ -81,6 +87,9 @@ async function load(): Promise<void> {
   try {
     if (!library.ready) await library.loadLibrary();
     game.value = await catalogApiService.get(catalogId.value);
+    if (game.value) {
+      catalogCovers.ingest([game.value], { merge: true });
+    }
   } catch (err) {
     error.value = userFacing(err, "No se pudo cargar el juego del catálogo.");
     game.value = null;

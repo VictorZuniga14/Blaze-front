@@ -11,6 +11,7 @@ export type CatalogGame = {
   contentType: string;
   fileSizeBytes: string;
   coverUrl: string | null;
+  bannerUrl?: string | null;
   hasCover: boolean;
   status: "uploading" | "published" | "failed";
   publisherUserId: string;
@@ -42,9 +43,7 @@ export type CatalogTransferProgress = {
   direction: "upload" | "download";
   bytesDone: number;
   bytesTotal: number;
-  /** Multipart paralelo: offset del rango en curso. */
   rangeOffset?: number;
-  /** Multipart paralelo: bytes hechos dentro del rango. */
   rangeDone?: number;
 };
 

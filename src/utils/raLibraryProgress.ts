@@ -253,15 +253,15 @@ export function exitStatusCopy(
   const clean = exitCode === 0 || exitCode === null;
   if (clean && raRefreshFailed) {
     return {
-      primary: "Juego cerrado correctamente.",
+      primary: "Partida finalizada.",
       raNotice: RA_REFRESH_FAILED,
     };
   }
   if (clean) {
-    return { primary: "El juego terminó correctamente.", raNotice: null };
+    return { primary: "Partida finalizada.", raNotice: null };
   }
   return {
-    primary: `El juego terminó con código ${exitCode}.`,
+    primary: `El juego se cerró con código ${exitCode}.`,
     raNotice: raRefreshFailed ? RA_REFRESH_FAILED : null,
   };
 }

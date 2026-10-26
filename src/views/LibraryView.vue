@@ -177,7 +177,10 @@ onMounted(() => {
 .library {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: calc(100vh - 80px);
+  /* Llena el shell sin forzar un 2.º scroll en app-shell__main */
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: #1b2838;
 }
 
@@ -185,6 +188,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   border-right: 1px solid rgba(0, 0, 0, 0.45);
   background: #171a21;
 }
@@ -386,6 +390,7 @@ onMounted(() => {
 
 .library-main {
   min-width: 0;
+  min-height: 0;
   padding: 16px 18px 28px;
   overflow: auto;
   background: linear-gradient(180deg, #2a475e 0%, #1b2838 180px, #1b2838 100%);

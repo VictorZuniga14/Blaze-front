@@ -187,10 +187,10 @@ describe("detalle y cierre", () => {
 
   it("un fallo de RA después de cerrar no convierte el cierre en error", () => {
     const failed = exitStatusCopy(0, true);
-    assert.equal(failed.primary, "Juego cerrado correctamente.");
+    assert.equal(failed.primary, "Partida finalizada.");
     assert.equal(failed.raNotice, RA_REFRESH_FAILED);
     const ok = exitStatusCopy(null, false);
-    assert.equal(ok.primary, "El juego terminó correctamente.");
+    assert.equal(ok.primary, "Partida finalizada.");
     assert.equal(ok.raNotice, null);
   });
 });

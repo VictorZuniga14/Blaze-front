@@ -137,7 +137,13 @@ const coverSrc = computed(() =>
   game.value ? catalogCovers.coverForGame(game.value) : null,
 );
 
-const bannerSrc = computed(() => resolveGameBanner(game.value?.title));
+const bannerSrc = computed(() => {
+  if (!game.value) return null;
+  return (
+    catalogCovers.bannerForGame(game.value) ??
+    resolveGameBanner(game.value.title)
+  );
+});
 
 const tags = computed(() =>
   gameTagLabels({
@@ -650,10 +656,13 @@ async function confirmDelete() {
     <p v-if="contentInfo" class="detail-banner detail-banner--info">
       {{ contentInfo }}
     </p>
-    <p v-if="endedMessage" class="detail-banner detail-banner--ok">
-      {{ endedMessage.primary }}
-      <span v-if="endedMessage.raNotice" class="detail-banner__sub">
-        {{ endedMessage.raNotice }}
+    <p v-if="endedMessage" class="detail-banner detail-banner--ok" role="status">
+      <span class="detail-banner__mark" aria-hidden="true">✓</span>
+      <span class="detail-banner__body">
+        {{ endedMessage.primary }}
+        <span v-if="endedMessage.raNotice" class="detail-banner__sub">
+          {{ endedMessage.raNotice }}
+        </span>
       </span>
     </p>
     <p v-if="playNotice" class="detail-banner detail-banner--warn">
@@ -1237,39 +1246,65 @@ async function confirmDelete() {
 
 .detail-banner {
   margin: 0 0 12px;
-  padding: 10px 12px;
-  border-radius: 3px;
+  padding: 10px 14px;
+  border-radius: 8px;
   font-size: 13px;
+  line-height: 1.35;
 }
 
 .detail-banner--error {
-  border: 1px solid rgba(244, 63, 94, 0.35);
-  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.28);
+  background: rgba(244, 63, 94, 0.1);
   color: #fecdd3;
 }
 
 .detail-banner--info {
-  border: 1px solid rgba(102, 192, 244, 0.35);
-  background: rgba(102, 192, 244, 0.1);
+  border: 1px solid rgba(102, 192, 244, 0.22);
+  background: rgba(102, 192, 244, 0.08);
   color: #c7d5e0;
 }
 
 .detail-banner--ok {
-  border: 1px solid rgba(16, 185, 129, 0.35);
-  background: rgba(16, 185, 129, 0.1);
-  color: #a7f3d0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid rgba(103, 193, 245, 0.18);
+  background: rgba(23, 26, 33, 0.72);
+  color: #c7d5e0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 
 .detail-banner--warn {
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.1);
   color: #fde68a;
+}
+
+.detail-banner__mark {
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(102, 192, 244, 0.16);
+  color: #66c0f4;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.detail-banner__body {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .detail-banner__sub {
   display: block;
   margin-top: 4px;
-  color: #fde68a;
+  color: #f0c14b;
+  font-size: 12px;
 }
 
 .detail-loading {

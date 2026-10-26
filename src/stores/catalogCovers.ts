@@ -6,28 +6,38 @@ import type { Game } from "../types/game";
 import { resolveCoverSrc } from "../utils/coverSrc";
 
 /**
- * Portadas del catálogo (API) indexadas por id remoto.
+ * Portadas / banners del catálogo (API) indexados por id remoto.
  * La biblioteca las reutiliza para verse igual que en Juegos.
  */
 export const useCatalogCoversStore = defineStore("catalogCovers", () => {
   const byCatalogId = ref<Record<string, string>>({});
+  const bannerByCatalogId = ref<Record<string, string>>({});
   const loaded = ref(false);
 
   function ingest(
     games: CatalogGame[],
     opts?: { merge?: boolean },
   ): void {
-    const next: Record<string, string> = opts?.merge
+    const nextCovers: Record<string, string> = opts?.merge
       ? { ...byCatalogId.value }
+      : {};
+    const nextBanners: Record<string, string> = opts?.merge
+      ? { ...bannerByCatalogId.value }
       : {};
     for (const game of games) {
       if (game.coverUrl?.trim()) {
-        next[game.id] = game.coverUrl.trim();
+        nextCovers[game.id] = game.coverUrl.trim();
       } else if (opts?.merge) {
-        delete next[game.id];
+        delete nextCovers[game.id];
+      }
+      if (game.bannerUrl?.trim()) {
+        nextBanners[game.id] = game.bannerUrl.trim();
+      } else if (opts?.merge) {
+        delete nextBanners[game.id];
       }
     }
-    byCatalogId.value = next;
+    byCatalogId.value = nextCovers;
+    bannerByCatalogId.value = nextBanners;
     loaded.value = true;
   }
 
@@ -51,7 +61,7 @@ export const useCatalogCoversStore = defineStore("catalogCovers", () => {
   }
 
   /**
-   * Preferí coverUrl del catálogo; si no hay (sin portada R2 / RA en BD),
+   * Preferí coverUrl del catálogo; si no hay (sin portada R2 / SGDB / RA),
    * usá coverPath local (p. ej. imageIcon de RA guardado al vincular).
    */
   function coverForGame(game: Game): string | null {
@@ -63,12 +73,21 @@ export const useCatalogCoversStore = defineStore("catalogCovers", () => {
     return resolveCoverSrc(game.coverPath);
   }
 
+  /** Banner del catálogo (SteamGridDB); null si no hay. */
+  function bannerForGame(game: Game): string | null {
+    const remoteId = game.catalogRemoteId?.trim();
+    if (!remoteId) return null;
+    return bannerByCatalogId.value[remoteId] ?? null;
+  }
+
   return {
     byCatalogId,
+    bannerByCatalogId,
     loaded,
     ingest,
     setCover,
     refresh,
     coverForGame,
+    bannerForGame,
   };
 });
