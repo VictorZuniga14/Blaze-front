@@ -124,7 +124,10 @@ export const catalogApiService = {
 
   async update(
     gameId: string,
-    body: { retroAchievementsGameId?: number | null },
+    body: {
+      retroAchievementsGameId?: number | null;
+      availableLanguages?: string[] | null;
+    },
   ): Promise<CatalogGame> {
     const token = await tokenOrThrow();
     const result = await apiRequest<{ game: CatalogGame }>(
