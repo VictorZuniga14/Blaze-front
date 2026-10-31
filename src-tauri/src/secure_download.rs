@@ -539,9 +539,14 @@ mod tests {
         let url = reqwest::Url::parse("https://abc123.r2.cloudflarestorage.com/file.bin").unwrap();
         assert!(host_allowed(&url), "Host exacto configurado debe ser permitido");
         
+        // El wildcard R2 sigue activo a propósito (ver host_allowed): un BLAZE_R2_HOST
+        // mal seteado no debe bloquear las descargas vendor.
         let url2 = reqwest::Url::parse("https://otro.r2.cloudflarestorage.com/file.bin").unwrap();
-        assert!(!host_allowed(&url2), "Otras cuentas R2 NO deben ser permitidas cuando hay host exacto");
-        
+        assert!(host_allowed(&url2), "Wildcard R2 sigue como fallback");
+
+        let url3 = reqwest::Url::parse("https://abc123.r2.cloudflarestorage.com.evil.com/file.bin").unwrap();
+        assert!(!host_allowed(&url3), "Hosts fuera de R2 siguen bloqueados");
+
         env::remove_var("BLAZE_R2_HOST");
     }
     

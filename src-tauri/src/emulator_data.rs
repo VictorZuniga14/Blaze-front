@@ -1992,9 +1992,14 @@ mod tests {
         assert!(cfg.contains("savefile_directory"));
         assert!(!cfg.to_ascii_lowercase().contains("cheevos"));
         assert!(!cfg.contains("libretro_directory"));
+        // Cfg existente: no se re-siembra, pero sí se aplican las políticas
+        // de hotkeys/mandos (también en installs viejos).
         fs::write(root.join("retroarch.cfg"), "KEEP").unwrap();
         seed_retroarch_cfg_if_missing(&root).unwrap();
-        assert_eq!(fs::read_to_string(root.join("retroarch.cfg")).unwrap(), "KEEP");
+        let kept = fs::read_to_string(root.join("retroarch.cfg")).unwrap();
+        assert!(kept.starts_with("KEEP\n"));
+        assert!(!kept.contains("savefile_directory"));
+        assert!(kept.contains("input_toggle_fullscreen = \"escape\""));
     }
 
     #[test]
