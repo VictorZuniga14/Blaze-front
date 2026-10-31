@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
-    "test": "tsx --test tests/raLibraryProgress.test.ts tests/playStats.test.ts tests/raAdapterResolver.test.ts tests/raIdentifyPersistence.test.ts tests/retroArchCores.test.ts tests/mapPool.test.ts tests/raSessionSyncController.test.ts tests/ensureRuntime.test.ts tests/catalogInstall.test.ts tests/emulatorAdapter.test.ts",
+    "test": "tsx --test tests/raLibraryProgress.test.ts tests/playStats.test.ts tests/raAdapterResolver.test.ts tests/raIdentifyPersistence.test.ts tests/retroArchCores.test.ts tests/mapPool.test.ts tests/raSessionSyncController.test.ts tests/ensureRuntime.test.ts tests/catalogInstall.test.ts tests/emulatorAdapter.test.ts tests/gameRegion.test.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

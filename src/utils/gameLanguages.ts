@@ -8,6 +8,7 @@ const LABELS: Record<string, string> = {
   fr: "Francés",
   de: "Alemán",
   it: "Italiano",
+  nl: "Neerlandés",
   ja: "Japonés",
   ko: "Coreano",
   zh: "Chino",

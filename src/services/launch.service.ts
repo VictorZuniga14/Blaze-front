@@ -8,6 +8,7 @@ import { resolveRetroArchLaunchArguments } from "../utils/platformRuntime";
 import { runtimeConfigService } from "./runtimeConfig.service";
 import { controllerPrefsService } from "./controllerPrefs.service";
 import { defaultPreferredLanguage } from "../utils/gameLanguages";
+import { detectGameRegion, regionLanguageWarning } from "../utils/gameRegion";
 import type {
   ActiveProcess,
   LastProcessResult,
@@ -26,7 +27,11 @@ export const launchService = {
   async launchGame(
     gameId: string,
     options?: { onSoftWarning?: (message: string) => void },
-  ): Promise<{ active: ActiveProcess; softWarning: string | null }> {
+  ): Promise<{
+    active: ActiveProcess;
+    softWarning: string | null;
+    launchInfo: string | null;
+  }> {
     const config = await launchConfigService.getByGameId(gameId);
     if (!config) {
       throw new Error("No hay una configuración de ejecución para este juego.");
@@ -36,6 +41,7 @@ export const launchService = {
     let argumentsForLaunch = [...config.arguments];
     let workingDirectory = config.workingDirectory;
     let softWarning: string | null = null;
+    let launchInfo: string | null = null;
 
     if (config.type === "native") {
       executablePath = config.executablePath;
@@ -125,6 +131,7 @@ export const launchService = {
         arguments: string[];
         error: string | null;
         errorCode: string | null;
+        launchInfo: string | null;
       }>("prepare_runtime_launch", {
         runtimeSource: runtime.source,
         runtimeType: runtime.type,
@@ -139,7 +146,18 @@ export const launchService = {
         throw new Error(launchPlan.error);
       }
       argumentsForLaunch = launchPlan.arguments;
-      softWarning = resolved.warning?.message ?? null;
+      launchInfo = launchPlan.launchInfo ?? null;
+      // NTSC-U/J traen un solo idioma: el parche de BIOS (PS2) no lo cambia.
+      const regionWarning =
+        runtimeKind === "pcsx2"
+          ? regionLanguageWarning(
+              detectGameRegion(contentPath, game?.title),
+              preferredLanguage,
+            )
+          : null;
+      softWarning =
+        [resolved.warning?.message, regionWarning].filter(Boolean).join(" ") ||
+        null;
     } else {
       throw new Error("Tipo de configuración de ejecución no soportado.");
     }
@@ -161,7 +179,7 @@ export const launchService = {
       workingDirectory,
       arguments: argumentsForLaunch,
     });
-    return { active, softWarning };
+    return { active, softWarning, launchInfo };
   },
 
   async onProcessExited(

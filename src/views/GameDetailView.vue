@@ -58,6 +58,7 @@ const {
   lastResult,
   error: launchError,
   softWarning: launchSoftWarning,
+  launchInfo,
   isBusy,
 } = storeToRefs(launch);
 const { postPlayNotice } = storeToRefs(raProgress);
@@ -395,9 +396,11 @@ async function play() {
   await launch.play(gameId.value);
   if (launchError.value) {
     pageError.value = launchError.value;
-  } else if (launchSoftWarning.value) {
-    // Ps1BiosRecommended u otros avisos: no bloquean el lanzamiento.
-    contentInfo.value = launchSoftWarning.value;
+  } else {
+    // BIOS/idioma activos + avisos (Ps1BiosRecommended, región): no bloquean.
+    contentInfo.value =
+      [launchInfo.value, launchSoftWarning.value].filter(Boolean).join(" — ") ||
+      null;
   }
 }
 

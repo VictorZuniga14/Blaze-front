@@ -17,6 +17,16 @@ import {
   type ControllerLayout,
 } from "../services/controllerPrefs.service";
 import { useCatalogDownloadStore } from "../stores/catalogDownload";
+import { gameService } from "../services/game.service";
+import {
+  defaultPreferredLanguage,
+  languageLabel,
+} from "../utils/gameLanguages";
+import {
+  detectGameRegion,
+  regionLabel,
+  regionLanguageWarning,
+} from "../utils/gameRegion";
 import {
   isEdenRuntime,
   isPcsx2Runtime,
@@ -61,8 +71,34 @@ const scaleOptions = ref<number[]>([1, 2, 3, 4]);
 
 const catalogDownloads = useCatalogDownloadStore();
 
+/** Idiomas OSD que acepta la BIOS PS2 (si el juego no declara los suyos). */
+const PS2_LANGUAGES = ["es", "en", "fr", "de", "it", "pt", "nl", "ja"];
+/** "" = automático (español si el juego lo soporta). */
+const languageChoice = ref("");
+
 const runtimeKind = computed(() =>
   runtimeKindForPlatform(props.game.platform),
+);
+
+const languageOptions = computed(() => {
+  const declared = props.game.availableLanguages
+    .map((code) => code.trim())
+    .filter(Boolean);
+  const options = declared.length > 0 ? declared : PS2_LANGUAGES;
+  const current = props.game.preferredLanguage?.trim();
+  return current && !options.includes(current) ? [...options, current] : options;
+});
+
+const region = computed(() =>
+  detectGameRegion(contentPath.value, props.game.title),
+);
+
+const regionWarning = computed(() =>
+  regionLanguageWarning(
+    region.value,
+    languageChoice.value ||
+      defaultPreferredLanguage(props.game.availableLanguages),
+  ),
 );
 
 const runtimeLabel = computed(() => {
@@ -245,9 +281,29 @@ function controllerPlayerLabel(c: GameControllerInfo): string {
     : `Player ${c.player} — ${c.name}`;
 }
 
+async function saveLanguage(): Promise<void> {
+  saving.value = true;
+  error.value = null;
+  okMsg.value = null;
+  try {
+    await gameService.setPreferredLanguage(
+      props.game.id,
+      languageChoice.value || null,
+    );
+    okMsg.value = "Idioma guardado. Se aplica la próxima vez que juegues.";
+    emit("updated");
+  } catch (e) {
+    error.value =
+      e instanceof Error ? e.message : "No se pudo guardar el idioma.";
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function loadAll(): Promise<void> {
   error.value = null;
   okMsg.value = null;
+  languageChoice.value = props.game.preferredLanguage?.trim() ?? "";
   await loadFiles();
   await loadRuntimeAudio();
 }
@@ -394,7 +450,39 @@ function close(): void {
                 <dt>Año</dt>
                 <dd>{{ game.releaseYear }}</dd>
               </div>
+              <div v-if="region">
+                <dt>Región</dt>
+                <dd>{{ regionLabel(region) }}</dd>
+              </div>
             </dl>
+
+            <template v-if="runtimeKind === 'pcsx2'">
+              <label class="props-field">
+                <span>Idioma del juego</span>
+                <select
+                  v-model="languageChoice"
+                  class="props-select"
+                  :disabled="saving"
+                  @change="saveLanguage"
+                >
+                  <option value="">Automático (español si está disponible)</option>
+                  <option
+                    v-for="code in languageOptions"
+                    :key="code"
+                    :value="code"
+                  >
+                    {{ languageLabel(code) }}
+                  </option>
+                </select>
+              </label>
+              <p class="props-hint">
+                Los juegos PAL usan el idioma de la BIOS. Blaze lo ajusta solo al
+                lanzar.
+              </p>
+              <p v-if="regionWarning" class="props-hint props-hint--warn">
+                {{ regionWarning }}
+              </p>
+            </template>
           </template>
 
           <template v-else-if="tab === 'files'">
@@ -878,6 +966,10 @@ function close(): void {
 
 .props-hint--block {
   margin-bottom: 12px;
+}
+
+.props-hint--warn {
+  color: #fcd34d;
 }
 
 .props-link {

@@ -78,7 +78,7 @@ fn normalize_kind(kind: &str) -> Result<&'static str, String> {
 }
 
 /// Lee valor de clave en sección INI estilo Qt (líneas `key=value`).
-fn ini_get(content: &str, section: &str, key: &str) -> Option<String> {
+pub(crate) fn ini_get(content: &str, section: &str, key: &str) -> Option<String> {
     let mut in_section = false;
     let section_hdr = format!("[{section}]");
     for line in content.lines() {

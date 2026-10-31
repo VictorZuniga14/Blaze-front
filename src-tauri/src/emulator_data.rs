@@ -72,6 +72,8 @@ pub struct RuntimeLaunchPlan {
     pub arguments: Vec<String>,
     pub error: Option<String>,
     pub error_code: Option<String>,
+    /// Resumen para el usuario antes de lanzar (PS2: "BIOS: … · Idioma: …").
+    pub launch_info: Option<String>,
 }
 
 #[derive(Debug)]
@@ -92,6 +94,7 @@ impl LaunchPrepError {
                     bios_dir.display()
                 )),
                 error_code: Some("BiosMissing".to_string()),
+                launch_info: None,
             },
             Self::KeysMissing { keys_dir } => RuntimeLaunchPlan {
                 arguments: vec![],
@@ -100,6 +103,7 @@ impl LaunchPrepError {
                     keys_dir.display()
                 )),
                 error_code: Some("KeysMissing".to_string()),
+                launch_info: None,
             },
             Self::FirmwareMissing { firmware_dir } => RuntimeLaunchPlan {
                 arguments: vec![],
@@ -108,11 +112,13 @@ impl LaunchPrepError {
                     firmware_dir.display()
                 )),
                 error_code: Some("FirmwareMissing".to_string()),
+                launch_info: None,
             },
             Self::Io(m) => RuntimeLaunchPlan {
                 arguments: vec![],
                 error: Some(format!("Error preparando datos del emulador: {m}")),
                 error_code: Some("Io".to_string()),
+                launch_info: None,
             },
         }
     }
@@ -712,6 +718,7 @@ pub fn prepare_runtime_launch(
             arguments: args,
             error: None,
             error_code: None,
+            launch_info: None,
         };
     }
 
@@ -822,9 +829,35 @@ pub fn prepare_runtime_launch(
             arguments,
             error: None,
             error_code: None,
+            launch_info: match (launch_kind, paths.pcsx2_data_root.as_deref()) {
+                ("pcsx2", Some(data_root)) => pcsx2_launch_info(data_root),
+                _ => None,
+            },
         },
         Err(e) => e.into_launch_plan(),
     }
+}
+
+/// BIOS que usará PCSX2: `[Filenames] Bios` del ini o, si está vacío,
+/// la primera válida de la carpeta (mismo criterio que `FindBiosImage`).
+fn active_pcsx2_bios(data_root: &Path) -> Option<PathBuf> {
+    let bios_dir = pcsx2_bios_directory(data_root);
+    fs::read_to_string(data_root.join("inis").join("PCSX2.ini"))
+        .ok()
+        .and_then(|ini| crate::eden_config::ini_get(&ini, "Filenames", "Bios"))
+        .filter(|name| !name.is_empty())
+        .map(|name| bios_dir.join(name))
+        .filter(|path| path.is_file())
+        .or_else(|| find_valid_pcsx2_bios(&bios_dir))
+}
+
+fn pcsx2_launch_info(data_root: &Path) -> Option<String> {
+    let bios = active_pcsx2_bios(data_root)?;
+    let name = bios.file_stem()?.to_string_lossy().into_owned();
+    let language = crate::pcsx2_bios_lang::read_bios_language(&bios)
+        .map(crate::pcsx2_bios_lang::lang_label)
+        .unwrap_or("Desconocido");
+    Some(format!("BIOS: {name} · Idioma: {language}"))
 }
 
 /// Tamaño típico de BIOS PS1 (512 KiB). Sin hashes de dumps conocidos.
