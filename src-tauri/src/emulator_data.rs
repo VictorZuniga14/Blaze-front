@@ -647,11 +647,9 @@ pub fn build_managed_launch_arguments(
                 datapath.to_string_lossy().to_string(),
             ];
             // Fast boot salta la BIOS → Multi5 PAL (GoW 1, etc.) quedan en inglés.
-            // Full boot cuando el idioma forzado no es inglés.
-            let lang = force_lang.trim().to_ascii_lowercase();
-            if lang == "en" || lang == "english" {
-                args.push("-fastboot".to_string());
-            }
+            // PCSX2 trae fast boot activado por defecto: omitir `-fastboot` no alcanza,
+            // hay que forzar `-slowboot` para que la BIOS lea el idioma del .nvm.
+            args.push(pcsx2_boot_flag(force_lang).to_string());
             if start_fullscreen {
                 args.push("-fullscreen".to_string());
             }
@@ -835,6 +833,15 @@ pub fn prepare_runtime_launch(
             },
         },
         Err(e) => e.into_launch_plan(),
+    }
+}
+
+/// Inglés → fast boot (más rápido, es el default de los juegos). Otro idioma →
+/// boot completo, único modo en que los PAL multi-idioma leen el idioma del OSD.
+fn pcsx2_boot_flag(force_lang: &str) -> &'static str {
+    match force_lang.trim().to_ascii_lowercase().as_str() {
+        "en" | "english" => "-fastboot",
+        _ => "-slowboot",
     }
 }
 
@@ -2000,6 +2007,15 @@ mod tests {
         assert!(kept.starts_with("KEEP\n"));
         assert!(!kept.contains("savefile_directory"));
         assert!(kept.contains("input_toggle_fullscreen = \"escape\""));
+    }
+
+    #[test]
+    fn pcsx2_boot_flag_forces_full_boot_for_non_english() {
+        assert_eq!(pcsx2_boot_flag("en"), "-fastboot");
+        assert_eq!(pcsx2_boot_flag(" English "), "-fastboot");
+        // PCSX2 hace fast boot por defecto: hay que forzar slowboot explícitamente.
+        assert_eq!(pcsx2_boot_flag("es"), "-slowboot");
+        assert_eq!(pcsx2_boot_flag("fr"), "-slowboot");
     }
 
     #[test]
