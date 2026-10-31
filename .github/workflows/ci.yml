@@ -41,6 +41,7 @@ jobs:
       - name: Build front
         run: npx vite build
 
+      # Sin --locked: el lock se mantiene desde CI (no hay toolchain Rust local).
       - name: Tests Rust
         working-directory: src-tauri
-        run: cargo test --locked
+        run: cargo test
